@@ -23,8 +23,6 @@ def load_dataset(
 
     if phases is None:
         phases = ["train", "val", "test"]
-    elif not isinstance(phases, list):
-        raise TypeError(f"Unvailable values: {phases}")
 
     for phase in phases:
         is_train = phase == "train"

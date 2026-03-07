@@ -20,7 +20,12 @@ MODEL_BASE_URL = "https://github.com/tsukumijima/marine-plus/releases/download/"
 
 # https://github.com/tqdm/tqdm#hooks-and-callbacks
 class _TqdmUpTo(tqdm):  # type: ignore
-    def update_to(self, b=1, bsize=1, tsize=None):
+    def update_to(
+        self,
+        b: int = 1,
+        bsize: int = 1,
+        tsize: int | None = None,
+    ) -> int | None:
         if tsize is not None:
             self.total = tsize
         return self.update(b * bsize - self.n)
@@ -43,8 +48,6 @@ def retrieve_pretrained_model(version: str | None = None) -> Path:
 
     if version is None:
         version = DEFAULT_VERSION
-    elif not isinstance(version, str):
-        raise TypeError(f"version must be str not {type(version)}")
 
     url = MODEL_BASE_URL + f"{version}/model.tar.gz"
 

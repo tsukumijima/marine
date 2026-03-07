@@ -2,7 +2,7 @@ import importlib.resources as importlib_resources
 import json
 from logging import getLogger
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import torch
@@ -70,7 +70,9 @@ def test_log_sample() -> dict[str, Any]:
     return logs
 
 
-def test_sentence_level_accuracy(sentence_level_accuracy):
+def test_sentence_level_accuracy(
+    sentence_level_accuracy: SentenceLevelAccuracy,
+) -> None:
     for pred, target, mask, expect in [
         (
             torch.tensor([[1, 2, 1, 1, 2, 1, 0], [1, 2, 1, 1, 1, 0, 0]]),
@@ -108,11 +110,11 @@ def test_sentence_level_accuracy(sentence_level_accuracy):
     ]:
         sentence_level_accuracy.update(pred, target, mask)
         score = sentence_level_accuracy.compute()
-        assert_almost_equal(score, expect)
+        assert_almost_equal(score.item(), expect)
         sentence_level_accuracy.reset()
 
 
-def test_ap_muti_task_metrics(ap_multi_task_metrics):
+def test_ap_muti_task_metrics(ap_multi_task_metrics: MultiTaskMetrics) -> None:
     for task, ap_pred, ap_target, ap_mask, kwargs, expect in [
         (
             "accent_status",
@@ -194,7 +196,13 @@ def test_ap_muti_task_metrics(ap_multi_task_metrics):
             },
         ),
     ]:
-        ap_multi_task_metrics.update(task, ap_pred, ap_target, ap_mask, **kwargs)
+        ap_multi_task_metrics.update(
+            task,
+            ap_pred,
+            ap_target,
+            ap_mask,
+            **cast(dict[str, Any], kwargs),
+        )
         scores = ap_multi_task_metrics.compute()
 
         for score_name, expect_score in expect.items():
@@ -203,10 +211,13 @@ def test_ap_muti_task_metrics(ap_multi_task_metrics):
         ap_multi_task_metrics.reset()
 
 
-def test_ap_muti_task_metrics_by_log(test_log_sample, full_multi_task_metrics):
+def test_ap_muti_task_metrics_by_log(
+    test_log_sample: dict[str, Any],
+    full_multi_task_metrics: MultiTaskMetrics,
+) -> None:
     """Unit test for MultiTaskMetrics by sample"""
 
-    def _extract_label(key, log):
+    def _extract_label(key: str, log: dict[str, str]) -> torch.Tensor:
         label = [int(v) for v in log[key].split(",")]
         # (T) -> (1, T)
         label = torch.tensor(label).unsqueeze(0).to("cpu")

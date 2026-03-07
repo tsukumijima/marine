@@ -1,18 +1,22 @@
 import argparse
 import datetime
 import json
+import logging
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import yaml
+from numpy.typing import NDArray
 from tqdm import tqdm
 
 from marine.logger import getLogger
+from marine.types import AccentRepresentMode
 from marine.utils.g2p_util import pron2mora
 
 
-logger = None
+logger: logging.Logger | None = None
 
 UNUSED_SYMBOL_REMOVER = str.maketrans("", "", "^$[?")
 ACCENT_NUCLEUS_SYMBOL = "]"
@@ -21,7 +25,7 @@ INTONATION_PHRASE_BOUNDARY_SYMBOL = "_"
 INTONATION_PHRASE_BOUNDARY_PUNCTUATION = ","
 
 
-def get_parser():
+def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Convert Special format txt format data to json file",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -55,7 +59,11 @@ def get_parser():
     return parser
 
 
-def alignment_feature(features, target_feature, ignore_features):
+def alignment_feature(
+    features: NDArray[np.str_],
+    target_feature: str,
+    ignore_features: str,
+) -> NDArray[np.bool_]:
     # filtering
     for ignore_feature in ignore_features:
         features = features[features != ignore_feature]
@@ -76,26 +84,29 @@ def alignment_feature(features, target_feature, ignore_features):
     return _features
 
 
-def convert_mask_seq_to_int_seq(feature):
+def convert_mask_seq_to_int_seq(feature: NDArray[np.bool_]) -> NDArray[np.int_]:
     return np.where(feature, 1, 0)
 
 
-def merge_ip_ap_boundary(accent_phrase_boundaries, intonation_phrase_boundaries):
+def merge_ip_ap_boundary(
+    accent_phrase_boundaries: NDArray[np.int_],
+    intonation_phrase_boundaries: NDArray[np.int_],
+) -> NDArray[np.int_]:
     assert len(accent_phrase_boundaries) == len(intonation_phrase_boundaries)
 
     return accent_phrase_boundaries + intonation_phrase_boundaries
 
 
 def binary_accent_to_ap_accent(
-    binary_accents,
-    accent_phrase_boundaries,
-    accent_label=1,
-    accnet_phrase_label=1,
-):
+    binary_accents: NDArray[np.int_],
+    accent_phrase_boundaries: NDArray[np.int_],
+    accent_label: int = 1,
+    accent_phrase_label: int = 1,
+) -> list[int]:
     assert len(binary_accents) == len(accent_phrase_boundaries)
 
     accent_phrase_boundary_indexes = np.where(
-        accent_phrase_boundaries == accnet_phrase_label
+        accent_phrase_boundaries == accent_phrase_label
     )[0]
     splitted_binary_accents = np.split(binary_accents, accent_phrase_boundary_indexes)
 
@@ -115,17 +126,17 @@ def binary_accent_to_ap_accent(
 
 
 def binary_accent_to_high_low_accent(
-    moras,
-    binary_accents,
-    accent_phrase_boundaries,
-    accent_label=1,
-    accnet_phrase_label=1,
-    accent_status_represent_mode="high_low",
-):
+    moras: NDArray[np.str_],
+    binary_accents: NDArray[np.int_],
+    accent_phrase_boundaries: NDArray[np.int_],
+    accent_label: int = 1,
+    accent_phrase_label: int = 1,
+    accent_status_represent_mode: AccentRepresentMode = "high_low",
+) -> list[int]:
     assert len(moras) == len(binary_accents) == len(accent_phrase_boundaries)
 
     accent_phrase_boundary_indexes = np.where(
-        accent_phrase_boundaries == accnet_phrase_label
+        accent_phrase_boundaries == accent_phrase_label
     )[0]
     splitted_moras = np.split(moras, accent_phrase_boundary_indexes)
     splitted_binary_accents = np.split(binary_accents, accent_phrase_boundary_indexes)
@@ -137,37 +148,47 @@ def binary_accent_to_high_low_accent(
 
         if len(accent_indexs) >= 1:
             _acc = accent_indexs[0] + 1  # zero pad
-            _, acc = pron2mora(mora, int(_acc), accent_status_represent_mode)
-            if accent_status_represent_mode == "high_low" and mora[int(_acc)] == "ー":
+            result = pron2mora(mora, int(_acc), accent_status_represent_mode)
+            assert isinstance(result, tuple)
+            _, acc = result
+            if (
+                accent_status_represent_mode == "high_low"
+                and int(_acc) < len(mora)
+                and mora[int(_acc)] == "ー"
+            ):
                 acc[int(_acc)] = 0
         else:
-            _, acc = pron2mora(mora, 0, accent_status_represent_mode)
+            result = pron2mora(mora, 0, accent_status_represent_mode)
+            _, acc = result
 
         high_low_accent_labels += acc
 
     return high_low_accent_labels
 
 
-def convert_to_srt_feature(features, splitter=","):
+def convert_to_srt_feature(
+    features: NDArray[Any] | list[int] | list[str],
+    splitter: str = ",",
+) -> str:
     if isinstance(features, np.ndarray):
         features = features.tolist()
-    elif not isinstance(features, list):
-        raise TypeError("Wrong type of feature")
 
     return splitter.join([str(value) for value in features])
 
 
 def parse_jsut_annotation(
-    annotation, accent_status_seq_level, accent_status_represent_mode
-):
-    features = {}
+    annotation: str,
+    accent_status_seq_level: str,
+    accent_status_represent_mode: AccentRepresentMode,
+) -> dict[str, str]:
+    features: dict[str, str] = {}
 
     # preprocessing: remove unused symbols
     annotation = annotation.translate(UNUSED_SYMBOL_REMOVER)
     # preprocessing: replace ヲ -> オ
     annotation = annotation.replace("ヲ", "オ")
     # preprocessing: parse as sequence
-    mora_based_annotation = np.array(pron2mora(annotation))
+    mora_based_annotation = np.array(cast(list[str], pron2mora(annotation)))
 
     # filtering symbol
     moras = mora_based_annotation[
@@ -237,14 +258,15 @@ def parse_jsut_annotation(
 
 
 def load_jsut_corpus(
-    jsut_corpus_dir, accent_status_seq_level, accent_status_represent_mode
-):
+    jsut_corpus_dir: Path,
+    accent_status_seq_level: str,
+    accent_status_represent_mode: AccentRepresentMode,
+    logger: logging.Logger,
+) -> list[dict[str, str]]:
     text_yaml_path = jsut_corpus_dir / "text_kana" / "basic5000.yaml"
     annotation_yaml_path = jsut_corpus_dir / "e2e_symbol" / "katakana.yaml"
 
-    scripts = []
-    texts = {}
-    annotations = {}
+    scripts: list[dict[str, str]] = []
 
     with open(text_yaml_path, encoding="utf-8") as file:
         texts = yaml.safe_load(file)
@@ -274,7 +296,7 @@ def load_jsut_corpus(
     return scripts
 
 
-def entry(argv=sys.argv):
+def entry(argv: list[str] = sys.argv) -> None:
     global logger
 
     args = get_parser().parse_args(argv[1:])
@@ -282,7 +304,10 @@ def entry(argv=sys.argv):
     logger.debug(f"Loaded parameters: {args}")
 
     scripts = load_jsut_corpus(
-        args.in_path, args.accent_status_seq_level, args.accent_status_represent_mode
+        args.in_path,
+        args.accent_status_seq_level,
+        args.accent_status_represent_mode,
+        logger,
     )
 
     if not args.out_dir.exists():

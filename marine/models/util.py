@@ -1,5 +1,5 @@
 from logging import getLogger
-from typing import Any
+from typing import Any, Literal, overload
 
 from hydra.utils import instantiate
 from omegaconf import DictConfig
@@ -7,9 +7,30 @@ from torch import nn
 from torch.optim import Optimizer
 
 from marine.data.feature.feature_set import FeatureSet
+from marine.models.base_model import BaseModel
 
 
 logger = getLogger(__name__)
+
+
+@overload
+def init_model(
+    tasks: list[str],
+    config: DictConfig,
+    feature_set: FeatureSet,
+    device: str,
+    is_train: Literal[True],
+) -> tuple[BaseModel, dict[str, nn.Module], Optimizer, Any]: ...
+
+
+@overload
+def init_model(
+    tasks: list[str],
+    config: DictConfig,
+    feature_set: FeatureSet,
+    device: str,
+    is_train: Literal[False] = False,
+) -> BaseModel: ...
 
 
 def init_model(
@@ -18,9 +39,10 @@ def init_model(
     feature_set: FeatureSet,
     device: str,
     is_train: bool = False,
-) -> nn.Module | tuple[nn.Module, dict[str, nn.Module], Optimizer, Any]:
+) -> BaseModel | tuple[BaseModel, dict[str, nn.Module], Optimizer, Any]:
+    criterions: dict[str, nn.Module] = {}
+
     if is_train:
-        criterions = {}
         optimizer = None
         scheduler = None
 
@@ -37,7 +59,7 @@ def init_model(
     encoder_output_size = config.model.encoder.param.hidden_size * 2
     encoder_kwargs = {"input_size": encooder_input_size}
 
-    encoders = {}
+    encoders: dict[str, nn.Module] = {}
     for task in tasks:
         if (
             config.model.encoder.shared_with[task]
@@ -63,7 +85,7 @@ def init_model(
     }
 
     # init decoders with criterion
-    decoders = {}
+    decoders: dict[str, nn.Module] = {}
     for task in tasks:
         # init embedding for
         if config.model.decoder[task]["prev_task_embedding_label_list"]:

@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import torch
 from torchmetrics import F1Score, Metric, MetricCollection
@@ -36,7 +36,9 @@ class SentenceLevelAccuracy(Metric):
 
     def compute(self) -> torch.Tensor:
         """Compute accuracy using variables."""
-        return self.correct.float() / self.total
+        correct = cast(torch.Tensor, self.correct)
+        total = cast(torch.Tensor, self.total)
+        return correct.float() / total
 
 
 class MultiTaskMetrics:
@@ -44,12 +46,12 @@ class MultiTaskMetrics:
 
     def __init__(
         self,
-        phase: Literal["train", "val", "test"],
+        phase: str,
         task_label_sizes: dict[str, int],
         average: Literal["micro", "macro", "weighted", "none"] = "macro",
         accent_represent_mode: AccentRepresentMode = "binary",
         require_ap_level_f1_score: bool = False,
-        device: Literal["cpu", "cuda"] = "cpu",
+        device: str | torch.device = "cpu",
     ) -> None:
         self.phase = phase
         self.tasks = task_label_sizes.keys()

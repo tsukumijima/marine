@@ -7,6 +7,7 @@ Conditional random field
 
 import math
 from logging import getLogger
+from typing import cast
 
 import torch
 
@@ -14,6 +15,9 @@ import torch
 logger = getLogger(__name__)
 
 VITERBI_DECODING = tuple[list[int], float]  # a list of tags, and a viterbi score
+VITERBI_DECODE_RESULT = (
+    tuple[list[int], torch.Tensor] | tuple[list[list[int]], torch.Tensor]
+)
 
 
 def logsumexp(
@@ -46,7 +50,7 @@ def viterbi_decode(
     allowed_start_transitions: torch.Tensor | None = None,
     allowed_end_transitions: torch.Tensor | None = None,
     top_k: int | None = None,
-):
+) -> VITERBI_DECODE_RESULT:
     """
     Perform Viterbi decoding in log space over a sequence given a transition matrix
     specifying pairwise (transition) potentials between tags and a matrix of shape
@@ -194,7 +198,7 @@ def viterbi_decode(
     viterbi_scores, best_paths = torch.topk(path_scores_v, k=max_k, dim=0)
     viterbi_paths = []
     for i in range(max_k):
-        viterbi_path = [best_paths[i]]
+        viterbi_path = [int(best_paths[i])]
         for backward_timestep in reversed(path_indices):
             viterbi_path.append(int(backward_timestep.view(-1)[viterbi_path[-1]]))
         # Reverse the backward path.
@@ -270,7 +274,10 @@ class ConditionalRandomField(torch.nn.Module):
             torch.nn.init.normal_(self.end_transitions)
 
     def _input_likelihood(
-        self, logits: torch.Tensor, transitions: torch.Tensor, mask: torch.BoolTensor
+        self,
+        logits: torch.Tensor,
+        transitions: torch.Tensor,
+        mask: torch.Tensor,
     ) -> torch.Tensor:
         """
         Computes the (batch_size,) denominator term $Z(x)$, per example, for the log-likelihood
@@ -288,7 +295,7 @@ class ConditionalRandomField(torch.nn.Module):
         batch_size, sequence_length, num_tags = logits.size()
 
         # Transpose batch size and sequence dimensions
-        mask = mask.transpose(0, 1).contiguous()
+        mask = mask.transpose(0, 1).contiguous().to(torch.bool)
         logits = logits.transpose(0, 1).contiguous()
 
         # Initial alpha is the (batch_size, num_tags) tensor of likelihoods combining the
@@ -335,7 +342,7 @@ class ConditionalRandomField(torch.nn.Module):
         logits: torch.Tensor,
         transitions: torch.Tensor,
         tags: torch.Tensor,
-        mask: torch.BoolTensor,
+        mask: torch.Tensor,
     ) -> torch.Tensor:
         """Computes the numerator term for the log-likelihood, which is just score(inputs, tags)
         Args:
@@ -354,7 +361,7 @@ class ConditionalRandomField(torch.nn.Module):
 
         # Transpose batch size and sequence dimensions:
         logits = logits.transpose(0, 1).contiguous()
-        mask = mask.transpose(0, 1).contiguous()
+        mask = mask.transpose(0, 1).contiguous().to(torch.bool)
         tags = tags.transpose(0, 1).contiguous()
 
         # Start with the transition scores from start_tag to the first tag in each input
@@ -405,7 +412,7 @@ class ConditionalRandomField(torch.nn.Module):
         self,
         inputs: torch.Tensor,
         tags: torch.Tensor,
-        mask: torch.BoolTensor | None = None,
+        mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Computes the log likelihood for the given batch of input sequences $(x,y)$
         Args:
@@ -431,7 +438,7 @@ class ConditionalRandomField(torch.nn.Module):
     def viterbi_tags(
         self,
         logits: torch.Tensor,
-        mask: torch.BoolTensor | None = None,
+        mask: torch.Tensor | None = None,
         top_k: int | None = None,
     ) -> list[VITERBI_DECODING] | list[list[VITERBI_DECODING]]:
         """
@@ -455,7 +462,8 @@ class ConditionalRandomField(torch.nn.Module):
         _, max_seq_length, num_tags = logits.size()
 
         # Get the tensors out of the variables
-        logits, mask = logits.data, mask.data
+        logits = logits.data
+        mask = mask.data.to(torch.bool)
 
         # Augment transitions matrix with start and end transitions
         start_tag = num_tags
@@ -515,6 +523,7 @@ class ConditionalRandomField(torch.nn.Module):
                 transition_matrix=transitions,
                 top_k=top_k,
             )
+            viterbi_paths = cast(list[list[int]], viterbi_paths)
             top_k_paths = []
             for viterbi_path, viterbi_score in zip(viterbi_paths, viterbi_scores):
                 # Get rid of START and END sentinels and append.

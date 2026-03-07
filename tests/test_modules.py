@@ -199,6 +199,9 @@ def test_viterbi_decode_top_k():
     assert indices[0] == [3, 2, 1]
     assert value[0] == 18
 
+    def _get_scored_sequence_score(result: tuple[float, list[int]]) -> float:
+        return result[0]
+
     def _brute_decode(
         tag_sequence: torch.Tensor, transition_matrix: torch.Tensor, top_k: int = 5
     ) -> Any:
@@ -228,9 +231,11 @@ def test_viterbi_decode_top_k():
             scored_sequences.append((score, sequence))
 
         # Get the top k scores / paths
-        top_k_sequences = sorted(scored_sequences, key=lambda r: r[0], reverse=True)[
-            :top_k
-        ]
+        top_k_sequences = sorted(
+            scored_sequences,
+            key=_get_scored_sequence_score,
+            reverse=True,
+        )[:top_k]
         scores, paths = zip(*top_k_sequences)
 
         return paths, scores  # type: ignore

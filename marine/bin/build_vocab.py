@@ -1,6 +1,8 @@
 import argparse
+import logging
 import sys
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
 
 from joblib import dump
@@ -10,10 +12,10 @@ from marine.logger import getLogger
 from marine.utils.util import load_json_corpus
 
 
-logger = None
+logger: logging.Logger | None = None
 
 
-def get_parser():
+def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Generate vocabulary file for word-embedding",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -39,27 +41,34 @@ def get_parser():
     return parser
 
 
-def count_words(words):
+def count_words(words: Sequence[str]) -> list[tuple[str, int]]:
+
+    def _get_frequency_value(item: tuple[str, int]) -> int:
+        return item[1]
+
     freqs = defaultdict(int)
 
     for word in tqdm(words, "Counting word", leave=False):
         freqs[word] += 1
 
-    freqs = sorted(freqs.items(), key=lambda x: x[1], reverse=True)
+    freqs = sorted(freqs.items(), key=_get_frequency_value, reverse=True)
 
     return freqs
 
 
-def filter_words(freqs, min_freq):
-    return list(filter(lambda x: x[1] >= min_freq, freqs))
+def filter_words(
+    freqs: Sequence[tuple[str, int]],
+    min_freq: int,
+) -> list[tuple[str, int]]:
+    return [freq for freq in freqs if freq[1] >= min_freq]
 
 
-def save_vocab(freqs, output_dir):
+def save_vocab(freqs: Sequence[tuple[str, int]], output_dir: Path) -> None:
     words = [surface for surface, _ in freqs]
     dump(words, output_dir / "vocab.pkl", compress=True)
 
 
-def entry(argv=sys.argv):
+def entry(argv: list[str] = sys.argv) -> None:
     global logger
 
     args = get_parser().parse_args(argv[1:])

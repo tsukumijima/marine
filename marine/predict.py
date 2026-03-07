@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import torch
 from omegaconf import DictConfig, OmegaConf
-from torch import Tensor, nn
+from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
 
 from marine.data.feature.feature_set import FeatureSet
@@ -17,12 +17,14 @@ from marine.models import (
     LinearDecoder,
     init_model,
 )
+from marine.models.base_model import BaseModel
 from marine.types import (
     AccentRepresentMode,
     BatchItem,
     MarineFeature,
     MarineLabel,
     ModelInputs,
+    MorphBoundaryArray,
     OpenJTalkFormatLabel,
     PredictAnnotates,
 )
@@ -30,8 +32,8 @@ from marine.utils.openjtalk_util import convert_open_jtalk_format_label
 from marine.utils.post_process import apply_postprocess_dict, load_postprocess_vocab
 from marine.utils.pretrained import retrieve_pretrained_model
 from marine.utils.util import (
-    _convert_ap_based_accent_to_mora_based_accent,
     convert_label_by_accent_representation_model,
+    convert_single_ap_based_accent_to_mora_based_accent,
     expand_word_label_to_mora,
     sequence_mask,
 )
@@ -44,7 +46,7 @@ DEFAULT_POSTPROCESS_VOCAB_DIR = BASE_DIR / "dict"
 class Predictor:
     """Interface for inference of accent model."""
 
-    model: nn.Module
+    model: BaseModel
     model_dir: Path
     config: DictConfig
     tasks: list[str]
@@ -74,7 +76,7 @@ class Predictor:
                 self.model_dir = Path(retrieve_pretrained_model())
             else:
                 self.model_dir = Path(retrieve_pretrained_model(version))
-        elif isinstance(model_dir, str):
+        else:
             self.model_dir = Path(model_dir)
 
         assert isinstance(self.model_dir, Path) and self.model_dir.exists(), (
@@ -93,10 +95,7 @@ class Predictor:
             feature_table_key=self.config.data.feature_table_key,
             feature_keys=self.config.data.input_keys,
         )
-        self.model = cast(
-            nn.Module,
-            init_model(self.tasks, self.config, self.feature_set, self.device),
-        )
+        self.model = init_model(self.tasks, self.config, self.feature_set, self.device)
         self._load_states()
 
         self.collate_fn = Padsequence(
@@ -122,7 +121,7 @@ class Predictor:
         if postprocess_vocab_dir is None:
             self.postprocess_vocab_dir = DEFAULT_POSTPROCESS_VOCAB_DIR
 
-        elif isinstance(postprocess_vocab_dir, str):
+        else:
             self.postprocess_vocab_dir = Path(postprocess_vocab_dir)
 
         assert self.postprocess_vocab_dir.exists(), (
@@ -169,38 +168,42 @@ class Predictor:
         inputs, morph_boundary = self.extract_feature(sentences)
         result["mora"] = self.convert_to_mora(inputs)
 
+        padded_annotates: dict[str, Tensor] | None = None
         if annotates is not None:
-            annotates = self.pad_annotate_label(
+            padded_annotates = self.pad_annotate_label(
                 annotates, mora=result["mora"], morph_boundary=morph_boundary
             )
 
         for task in self.tasks:
-            if annotates is not None and task in annotates.keys():
+            if padded_annotates is not None and task in padded_annotates.keys():
                 real_labels = self.convert_to_label(
                     task,
-                    annotates[task],
+                    padded_annotates[task],
                     inputs["mask"],
                     prev_task_outputs=inputs["prev_decoder_outputs"],
                     accent_represent_mode=accent_represent_mode,
                 )
-                prev_output = annotates[task]
+                prev_output = padded_annotates[task]
 
             else:
                 outputs = self.model(task, **inputs)
+                decoder = self.model.decoders[task]
 
-                if isinstance(self.model.decoders[task], CRFDecoder):
+                if isinstance(decoder, CRFDecoder):
                     _, logits = outputs
                     ap_lengths, ap_outputs = None, None
 
-                elif isinstance(self.model.decoders[task], LinearDecoder):
+                elif isinstance(decoder, LinearDecoder):
                     logits = outputs
                     ap_lengths, ap_outputs = None, None
 
-                elif isinstance(self.model.decoders[task], AttentionBasedLSTMDecoder):
+                elif isinstance(decoder, AttentionBasedLSTMDecoder):
                     logits, _, ap_lengths = outputs
                     ap_outputs = inputs["prev_decoder_outputs"][
                         "accent_phrase_boundary"
                     ]
+                else:
+                    raise TypeError(f"Unsupported decoder type: {type(decoder)}")
 
                 real_labels = self.convert_to_label(
                     task,
@@ -226,7 +229,7 @@ class Predictor:
                                 nodes,
                                 label,
                                 mora,
-                                boundary,
+                                boundary.tolist(),
                                 target,
                                 vocab,
                                 accent_represent_mode,
@@ -249,7 +252,7 @@ class Predictor:
     def extract_feature(
         self,
         sentences: list[list[MarineFeature]],
-    ) -> tuple[ModelInputs, list[Any]]:
+    ) -> tuple[ModelInputs, list[MorphBoundaryArray]]:
         batch: list[BatchItem] = [
             BatchItem(
                 features=self.feature_set.convert_nodes_to_feature(nodes),
@@ -307,7 +310,7 @@ class Predictor:
                         predict = padded_predict[: ap_lengths[index]]
                         ap_output = ap_outputs[index][mora_mask]
                         predict = torch.argmax(predict, dim=1)
-                        predict = _convert_ap_based_accent_to_mora_based_accent(
+                        predict = convert_single_ap_based_accent_to_mora_based_accent(
                             predict,
                             ap_output,
                             mode=accent_represent_mode,
@@ -352,7 +355,7 @@ class Predictor:
         self,
         annotates: PredictAnnotates,
         mora: list[list[str]],
-        morph_boundary: list[Any],
+        morph_boundary: list[MorphBoundaryArray],
     ) -> dict[str, Tensor]:
         result: dict[str, Tensor] = {}
         for key in annotates.keys():
@@ -361,19 +364,31 @@ class Predictor:
 
             if token_type == "morph":
                 annotate = expand_word_label_to_mora(
-                    annotate, mora, morph_boundary, key
+                    annotate,
+                    mora,
+                    morph_boundary,
+                    key,
                 )
             elif token_type != "mora":
                 raise ValueError(f"Token type must be morph or mora: {token_type}")
 
+            if len(annotate) == 0:
+                raise ValueError("Annotate labels must not be empty")
+
+            tensor_annotate: list[Tensor]
             if isinstance(annotate[0], list):
-                annotate = [torch.tensor(ann) for ann in annotate]
-            elif not isinstance(annotates[key][0], torch.Tensor):
+                tensor_annotate = [torch.tensor(ann) for ann in annotate]
+            elif isinstance(annotate[0], torch.Tensor):
+                tensor_annotate = cast(list[Tensor], annotate)
+            else:
                 raise ValueError(
                     "Annoate labels must be List[List] or List[tensor]:"
-                    f" {type(annotates[key][0])}"
+                    f" {type(annotate[0])}"
                 )
 
-            result[key] = pad_sequence(annotate, batch_first=True).to(self.device)  # type: ignore
+            result[key] = pad_sequence(
+                tensor_annotate,
+                batch_first=True,
+            ).to(self.device)
 
         return result

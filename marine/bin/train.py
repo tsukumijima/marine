@@ -1,14 +1,18 @@
 import json
+import logging
 import random
 import sys
 import time
 from pathlib import Path
 from shutil import copyfile
+from typing import Any, cast
 
 import hydra
 import torch
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig, OmegaConf
+from torch import nn
+from torch.optim import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -22,6 +26,7 @@ from marine.models import (
     LinearDecoder,
     init_model,
 )
+from marine.models.base_model import BaseModel
 from marine.utils.metrics import MultiTaskMetrics
 from marine.utils.util import (
     init_seed,
@@ -33,12 +38,20 @@ from marine.utils.util import (
 )
 
 
-logger = None
+DecoderModule = CRFDecoder | LinearDecoder | AttentionBasedLSTMDecoder
+logger: logging.Logger | None = None
 
 
 def save_checkpoint(
-    config, checkpoint_dir, model, optimizer, scheduler, epoch, is_best
-):
+    config: DictConfig,
+    checkpoint_dir: Path,
+    model: nn.Module | None,
+    optimizer: Optimizer | None,
+    scheduler: Any | None,
+    epoch: int,
+    is_best: bool,
+) -> None:
+    assert logger is not None
     if model is None:
         return
 
@@ -71,54 +84,52 @@ def save_checkpoint(
             ),
         }
 
-        if is_interval:
+        if is_interval and is_best:
             interval_checkpoint_path = checkpoint_dir / f"epoch_{epoch:05d}.pth"
+            best_checkpoint_path = checkpoint_dir / "best.pth"
             lastest_path = checkpoint_dir / "latest.pth"
             logger.info(f"Save interval checkpoint: {interval_checkpoint_path}")
-        else:
-            interval_checkpoint_path = None
-            lastest_path = None
-
-        if is_best:
-            best_checkpoint_path = checkpoint_dir / "best.pth"
             logger.info(f"Save best checkpoint: {best_checkpoint_path}")
-        else:
-            best_checkpoint_path = None
-
-        if is_interval and is_best:
             torch.save(states, interval_checkpoint_path)
             copyfile(interval_checkpoint_path, best_checkpoint_path)
             copyfile(interval_checkpoint_path, lastest_path)
 
         elif is_interval:
+            interval_checkpoint_path = checkpoint_dir / f"epoch_{epoch:05d}.pth"
+            lastest_path = checkpoint_dir / "latest.pth"
+            logger.info(f"Save interval checkpoint: {interval_checkpoint_path}")
             torch.save(states, interval_checkpoint_path)
             copyfile(interval_checkpoint_path, lastest_path)
 
         else:
+            best_checkpoint_path = checkpoint_dir / "best.pth"
+            logger.info(f"Save best checkpoint: {best_checkpoint_path}")
             torch.save(states, best_checkpoint_path)
 
 
 def train_model(
-    model,
-    criterions,
-    optimizer,
-    scheduler,
-    dataloader,
-    tasks,
-    tensorboard_writer,
-    checkpoint_dir,
-    config,
-    feature_set,
-    num_epochs=10,
-    device="cpu",
-):
+    model: BaseModel,
+    criterions: dict[str, Any],
+    optimizer: Optimizer,
+    scheduler: Any,
+    dataloader: dict[str, Any],
+    tasks: list[str],
+    tensorboard_writer: SummaryWriter | None,
+    checkpoint_dir: Path,
+    config: DictConfig,
+    feature_set: FeatureSet,
+    num_epochs: int = 10,
+    device: str = "cpu",
+) -> None:
+    assert logger is not None
     phases = ["train", "val"]
-    min_val_loss = [100.0] * len(tasks)
+    min_val_loss = float("inf")
     fig_logging_targets = random.choices(range(config.data.batch_size), k=10)
 
     if "accent_status" in tasks:
         has_att_based_model = isinstance(
-            model.decoders["accent_status"], AttentionBasedLSTMDecoder
+            cast(DecoderModule, model.decoders["accent_status"]),
+            AttentionBasedLSTMDecoder,
         )
     else:
         has_att_based_model = False
@@ -132,6 +143,7 @@ def train_model(
 
         for phase in phases:
             is_train = phase == "train"
+            phase_dataloader: Any = dataloader[phase]
 
             if is_train:
                 model.train()
@@ -149,15 +161,15 @@ def train_model(
             )
 
             for batch_index, (inputs, outputs, _, script_ids) in enumerate(
-                tqdm(dataloader[phase], desc=f"{phase}: ", leave=False)
+                tqdm(phase_dataloader, desc=f"{phase}: ", leave=False)
             ):
                 # pack inputs to device
                 inputs = pack_inputs(inputs, config.data.input_keys, device)
                 outputs = pack_outputs(outputs, device)
 
                 # total loss of the tasks on a single batch
-                batch_loss = 0.0
-                prev_decoder_output = {}
+                batch_loss: torch.Tensor | None = None
+                prev_decoder_output: dict[str, torch.Tensor] = {}
 
                 optimizer.zero_grad()
 
@@ -168,7 +180,8 @@ def train_model(
                     with torch.set_grad_enabled(is_train):
                         decoder_outputs = model(task, **inputs)
 
-                        if isinstance(model.decoders[task], CRFDecoder):
+                        decoder = cast(DecoderModule, model.decoders[task])
+                        if isinstance(decoder, CRFDecoder):
                             linear_logits, crf_logits = decoder_outputs
                             try:
                                 loss = criterions[task](
@@ -178,12 +191,10 @@ def train_model(
                                 print(script_ids)
                                 sys.exit(1)
                             logits = crf_logits
-                        elif isinstance(model.decoders[task], LinearDecoder):
+                        elif isinstance(decoder, LinearDecoder):
                             logits = decoder_outputs
                             loss = criterions[task](logits, output, output_mask)
-                        elif isinstance(
-                            model.decoders[task], AttentionBasedLSTMDecoder
-                        ):
+                        else:
                             logits, attentions, ap_lengths = decoder_outputs
                             # plot attention when first batch on eval
                             if (
@@ -209,8 +220,8 @@ def train_model(
                             logits = pad_incomplete_accent_logits(logits, output_mask)
                             loss = criterions[task](logits, output, output_mask)
 
-                        batch_loss += loss
-                        running_loss[task] += loss
+                        batch_loss = loss if batch_loss is None else batch_loss + loss
+                        running_loss[task] += float(loss.item())
 
                         # logits: (B, T, dim) -> (B, T)
                         predicts = torch.argmax(logits, dim=2)
@@ -263,7 +274,7 @@ def train_model(
                                 inputs["prev_decoder_outputs"][task] = _output
                                 inputs["decoder_targets"] = None
 
-                if is_train:
+                if is_train and batch_loss is not None:
                     batch_loss.backward()
                     optimizer.step()
 
@@ -282,16 +293,20 @@ def train_model(
             )
 
             if not is_train:
-                current_val_losses = list(epoch_loss.values())
+                current_val_loss = sum(epoch_loss.values())
 
                 # update schedule with validation loss
-                scheduler.step(sum(current_val_losses))
+                scheduler.step(current_val_loss)
                 epoch_lr = optimizer.param_groups[0]["lr"]
-                tensorboard_writer.add_scalar(f"{phase}_learning_rate", epoch_lr, epoch)
+                if tensorboard_writer is not None:
+                    tensorboard_writer.add_scalar(
+                        f"{phase}_learning_rate", epoch_lr, epoch
+                    )
 
                 # Save checkpoints
-                is_best = [loss.item() for loss in current_val_losses] < min_val_loss
-                min_val_loss = current_val_losses
+                is_best = current_val_loss < min_val_loss
+                if is_best:
+                    min_val_loss = current_val_loss
 
                 save_checkpoint(
                     config,
@@ -312,10 +327,11 @@ def my_app(config: DictConfig) -> None:
     global logger
     logger = getLogger(config.train.verbose)
     logger.info(OmegaConf.to_yaml(config))
+    assert logger is not None
 
     init_seed(config.train.seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     num_epochs = config.train.num_epochs
 
     dataloader = load_dataset(config)
@@ -340,7 +356,7 @@ def my_app(config: DictConfig) -> None:
     tensorboard_writer = SummaryWriter(tensorboard_event_path)
 
     # Setup test result logging
-    if config.train.test_log_dir:
+    if config.train.test_log_dir is not None:
         log_dir = Path(to_absolute_path(config.train.test_log_dir))
     else:
         log_dir = Path(to_absolute_path("logs")) / checkpoint_dir.name
@@ -406,7 +422,7 @@ def my_app(config: DictConfig) -> None:
     tensorboard_writer.close()
 
 
-def entry():
+def entry() -> None:
     my_app()
 
 

@@ -279,7 +279,7 @@ def download_and_apply_dictionaries() -> None:
         import pyopenjtalk
     except ImportError:
         raise ImportError(
-            'Please install pyopenjtalk by `pip install -e ".[dev,pyopenjtalk]"`'
+            "Please install pyopenjtalk by `uv sync --extra pyopenjtalk --group dev`"
         )
 
     # Download dictionaries if needed

@@ -5,6 +5,10 @@ from numpy.typing import NDArray
 from torch import Tensor
 
 
+FeatureIDArray = NDArray[np.int64]
+MorphBoundaryArray = NDArray[np.uint8]
+
+
 # アクセント表現モード
 AccentRepresentMode = Literal[
     "binary",  # アクセント核位置を1、それ以外を0で表現
@@ -83,16 +87,16 @@ class BatchFeature(TypedDict):
     """バッチの特徴量を表す型"""
 
     # 必須フィールド
-    morph_boundary: NDArray[np.uint8]  # 形態素境界情報
+    morph_boundary: MorphBoundaryArray  # 形態素境界情報
     # config.data.input_keys に依存するフィールド (推論に用いるモデルの config.yaml 定義次第では省略される)
-    mora: NDArray[np.uint8]  # モーラ ID 列
-    surface: NDArray[np.uint8]  # 表層形 ID 列
-    pos: NDArray[np.uint8]  # 品詞 ID 列
-    c_type: NDArray[np.uint8]  # 活用型 ID 列
-    c_form: NDArray[np.uint8]  # 活用形 ID 列
-    accent_type: NDArray[np.uint8]  # アクセント型 ID 列
-    accent_con_type: NDArray[np.uint8]  # アクセント結合型 ID 列
-    chain_flag: NDArray[np.uint8]  # アクセント句の連結フラグ ID 列 (現在の学習レシピでは未使用) # fmt: skip
+    mora: FeatureIDArray  # モーラ ID 列
+    surface: FeatureIDArray  # 表層形 ID 列
+    pos: FeatureIDArray  # 品詞 ID 列
+    c_type: FeatureIDArray  # 活用型 ID 列
+    c_form: FeatureIDArray  # 活用形 ID 列
+    accent_type: FeatureIDArray  # アクセント型 ID 列
+    accent_con_type: FeatureIDArray  # アクセント結合型 ID 列
+    chain_flag: FeatureIDArray  # アクセント句の連結フラグ ID 列 (現在の学習レシピでは未使用) # fmt: skip
 
 
 class BatchItem(TypedDict):

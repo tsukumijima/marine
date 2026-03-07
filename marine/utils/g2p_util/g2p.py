@@ -61,9 +61,6 @@ def pron2mora(
         i += 1
 
     if accent is not None:
-        if not isinstance(accent, int):
-            raise TypeError(f"Accent is must be int not {type(accent)}")
-
         if represent_mode not in ACCENT_REPRESENT_FUNC_TABLE.keys():
             raise NotImplementedError(f"Not Implemented mode : {represent_mode}")
 

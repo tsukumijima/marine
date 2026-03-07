@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 import torch
 from torch import Tensor, nn
@@ -85,7 +86,8 @@ class AttentionBasedLSTMDecoder(nn.Module):
         self.projection = nn.Linear(project_size, self.output_size, bias=False)
 
     def _zero_state(self, hs: Tensor) -> Tensor:
-        init_hs = hs.new_zeros(hs.size(0), self.lstm[0].hidden_size)
+        first_lstm = cast(ZoneOutCell, self.lstm[0])
+        init_hs = hs.new_zeros(hs.size(0), first_lstm.hidden_size)
         return init_hs
 
     def forward(

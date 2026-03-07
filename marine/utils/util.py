@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+from collections.abc import Sequence
 from logging import getLogger
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -100,7 +101,7 @@ def split_corpus(
     try:
         from sklearn.model_selection import train_test_split
     except BaseException:
-        raise ImportError('Please install sklearn by `pip install -e ".[dev]"`')
+        raise ImportError("Please install sklearn by `uv sync --group dev`")
 
     """Split corpus into train, valid, test."""
     if absolute_test_size > 0:
@@ -141,7 +142,7 @@ def sequence_mask(lengths: torch.Tensor, max_len: int | None = None) -> torch.Te
     batch_size = lengths.size(0)
 
     if max_len is None:
-        max_len = lengths.max().item()
+        max_len = int(lengths.max().item())
 
     ranges = torch.arange(0, max_len, device=lengths.device).long()  # type: ignore
     ranges = ranges.unsqueeze(0).expand(batch_size, max_len)
@@ -156,7 +157,7 @@ def sequence_mask(lengths: torch.Tensor, max_len: int | None = None) -> torch.Te
 def pack_inputs(
     inputs: dict[str, Any],
     embedding_keys: list[str],
-    device: torch.device,
+    device: str | torch.device,
 ) -> dict[str, Any]:
     """Covnert batch to tensor for input"""
     embeddings = {key: inputs[key].to(device) for key in embedding_keys}
@@ -170,7 +171,10 @@ def pack_inputs(
     return inputs
 
 
-def pack_outputs(outputs: dict[str, Any], device: torch.device) -> dict[str, Any]:
+def pack_outputs(
+    outputs: dict[str, Any],
+    device: str | torch.device,
+) -> dict[str, Any]:
     """Covnert batch to tensor for output"""
     outputs = {
         task: {
@@ -225,7 +229,7 @@ def get_ap_length(
 def expand_word_label_to_mora(
     labels: list[list[int]],
     moras: list[list[str]],
-    boundaries: list[int],
+    boundaries: Sequence[NDArray[np.uint8]],
     target: str,
 ) -> list[list[int]]:
     """Convert word-basd label sequence to mora-based label sequence."""
@@ -273,30 +277,35 @@ def _convert_ap_based_accent_to_mora_based_accent(
         "Representation mode must be selected in binary and high_low",
     )
 
-    ap_accents = ap_accents.cpu()
-    phrases = phrases.cpu()
+    ap_accent_array = ap_accents.cpu().numpy()
+    phrase_array = phrases.cpu().numpy()
 
-    boundaries = np.where(phrases == accent_phrase_boundary_label)[0]
-    phrases = np.split(phrases, boundaries)
+    boundaries = np.where(phrase_array == accent_phrase_boundary_label)[0]
+    split_phrases = np.split(phrase_array, boundaries)
+    ap_moras: list[NDArray[Any]] | None = None
 
     if mora is not None:
         ap_moras = np.split(np.array(mora), boundaries)
 
     # Pad or slice if there is miss-macth between predicted phrase and real-label
-    if len(phrases) < len(ap_accents):
-        ap_accents = ap_accents[: len(phrases)]
-    elif len(phrases) > len(ap_accents):
-        ap_accents = np.append(ap_accents, [0] * (len(phrases) - len(ap_accents)))
+    if len(split_phrases) < len(ap_accent_array):
+        ap_accent_array = ap_accent_array[: len(split_phrases)]
+    elif len(split_phrases) > len(ap_accent_array):
+        ap_accent_array = np.append(
+            ap_accent_array,
+            [0] * (len(split_phrases) - len(ap_accent_array)),
+        )
 
-    assert len(phrases) == len(ap_accents), (
-        f"Not matched seq lengths {len(phrases)} != {len(ap_accents)}"
+    assert len(split_phrases) == len(ap_accent_array), (
+        f"Not matched seq lengths {len(split_phrases)} != {len(ap_accent_array)}"
     )
 
     mora_accents = []
 
-    for index, (accent, phrase) in enumerate(zip(ap_accents, phrases)):
+    for index, (accent, phrase) in enumerate(zip(ap_accent_array, split_phrases)):
         if mode == BINARY_ACCENT_REPRESENT_MODE:
             if mora is not None:
+                assert ap_moras is not None
                 moras = ap_moras[index]
             else:
                 moras = ["*"] * len(phrase)
@@ -312,6 +321,7 @@ def _convert_ap_based_accent_to_mora_based_accent(
                 mora_accent[accent_label] = 1
         elif mode == HIGH_LOW_ACCENT_REPRESENT_MODE:
             if mora is not None:
+                assert ap_moras is not None
                 moras = ap_moras[index]
             else:
                 moras = ["*"] * len(phrase)
@@ -339,6 +349,24 @@ def _convert_ap_based_accent_to_mora_based_accent(
         mora_accents += mora_accent
 
     return np.array(mora_accents)
+
+
+def convert_single_ap_based_accent_to_mora_based_accent(
+    ap_accents: torch.Tensor,
+    phrases: torch.Tensor,
+    mode: AccentRepresentMode = HIGH_LOW_ACCENT_REPRESENT_MODE,
+    mora: list[str] | None = None,
+    accent_phrase_boundary_label: int = 2,
+) -> NDArray[Any]:
+    """Convert a single AP-based accent sequence into a mora-based sequence."""
+
+    return _convert_ap_based_accent_to_mora_based_accent(
+        ap_accents,
+        phrases,
+        mode=mode,
+        mora=mora,
+        accent_phrase_boundary_label=accent_phrase_boundary_label,
+    )
 
 
 def convert_ap_based_accent_to_mora_based_accent(
@@ -426,13 +454,9 @@ def convert_label_by_accent_representation_model(
 
     if isinstance(mora_based_accents, torch.Tensor):
         mora_based_accents = mora_based_accents.cpu()
-    elif not isinstance(mora_based_accents, np.ndarray):
-        raise TypeError("mora_based_accents must be tensor or numpy.array")
 
     if isinstance(accent_phrase_boundary, torch.Tensor):
         accent_phrase_boundary = accent_phrase_boundary.cpu()
-    elif not isinstance(accent_phrase_boundary, np.ndarray):
-        raise TypeError("accent_phrase_boundary must be tensor or numpy.array")
 
     assert len(mora_based_accents) == len(accent_phrase_boundary) == len(moras)
 
@@ -509,13 +533,18 @@ def plot_attention(
         import matplotlib.pyplot as plt
         import matplotlib.ticker as ticker
     except BaseException:
-        raise ImportError('Please install matplotlib by `pip install -e ".[dev]"`')
+        raise ImportError("Please install matplotlib by `uv sync --group dev`")
 
     fig, ax = plt.subplots()
-    attention = attention.cpu().data.numpy().T
+    attention_array = attention.cpu().data.numpy().T
 
     # draw attention
-    im = ax.imshow(attention, aspect="auto", origin="lower", interpolation="none")
+    im = ax.imshow(
+        attention_array,
+        aspect="auto",
+        origin="lower",
+        interpolation="none",
+    )
     fig.colorbar(im, ax=ax)
 
     # set labels
@@ -542,7 +571,7 @@ def plot_batch_attention(
     tensorboard_writer: Any | None = None,
     phase: str | None = None,
     epoch: int | None = None,
-    script_ids: list[Any] | None = None,
+    script_ids: Sequence[Any] | None = None,
     accent_phrase_boundary_label: int = 2,
 ) -> None:
     """Plot attentions in a batch"""
@@ -584,10 +613,10 @@ def plot_batch_attention(
 
 
 def convert_readable_labels(
-    predicts: list[Any],
-    targets: list[Any],
-    masks: list[Any],
-    script_ids: list[Any],
+    predicts: Sequence[Any] | torch.Tensor,
+    targets: Sequence[Any] | torch.Tensor,
+    masks: Sequence[Any] | torch.Tensor,
+    script_ids: Sequence[Any],
 ) -> dict[Any, Any]:
     """Convert logits to readable label"""
     logs = {}
@@ -629,7 +658,7 @@ def _make_task_group_variation(tasks: list[str], min_num: int = 2) -> list[list[
     return groups
 
 
-def _calculate_multiple_task_scores(
+def calculate_multiple_task_scores(
     tasks: list[str], logs: dict[str, Any]
 ) -> dict[str, Any]:
     task_groups = _make_task_group_variation(tasks)
@@ -662,7 +691,7 @@ def log_scores(
     tasks: list[str],
     metrics: MultiTaskMetrics,
     logs: dict[str, Any] | None = None,
-    loss: dict[str, Any] | None = None,
+    loss: dict[str, float] | None = None,
     tensorboard_writer: Any | None = None,
 ) -> None:
     """Log scores"""
@@ -672,10 +701,10 @@ def log_scores(
     # merge loss into score metrics
     if loss:
         for task in tasks:
-            scores[task]["loss"] = loss[task].item()
+            scores[task]["loss"] = loss[task]
 
     if logs:
-        multiple_task_scores = _calculate_multiple_task_scores(tasks, logs)
+        multiple_task_scores = calculate_multiple_task_scores(tasks, logs)
         tasks += list(multiple_task_scores.keys())
         scores.update(multiple_task_scores)
 

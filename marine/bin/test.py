@@ -1,11 +1,13 @@
 import argparse
 import json
+import logging
 import random
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import torch
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from marine.data.feature.feature_set import FeatureSet
@@ -17,6 +19,7 @@ from marine.models import (
     LinearDecoder,
     init_model,
 )
+from marine.models.base_model import BaseModel
 from marine.utils.metrics import MultiTaskMetrics
 from marine.utils.util import (
     convert_readable_labels,
@@ -30,10 +33,11 @@ from marine.utils.util import (
 )
 
 
-logger = None
+DecoderModule = CRFDecoder | LinearDecoder | AttentionBasedLSTMDecoder
+logger: logging.Logger | None = None
 
 
-def get_parser():
+def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Test model",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -84,17 +88,18 @@ def get_parser():
 
 
 def test_model(
-    model,
-    checkpoint_dir,
-    checkpoint_file,
-    tasks,
-    dataloader,
-    config,
-    feature_set,
-    tensorboard_writer=None,
-    logger=None,
-    device="cpu",
-):
+    model: BaseModel,
+    checkpoint_dir: Path,
+    checkpoint_file: str,
+    tasks: list[str],
+    dataloader: dict[str, Any],
+    config: DictConfig,
+    feature_set: FeatureSet,
+    tensorboard_writer: Any | None = None,
+    logger: logging.Logger | None = None,
+    device: str = "cpu",
+) -> dict[str, Any]:
+    assert logger is not None
     model_path = checkpoint_dir / checkpoint_file
     states = torch.load(model_path, weights_only=False)
 
@@ -104,11 +109,12 @@ def test_model(
     logger.info(f"Load checkpoint from {model_path} ({states['epoch']}th epoch)")
     model.load_state_dict(states["state_dict"])
 
-    dataloader = dataloader[phase]
+    phase_dataloader: Any = dataloader[phase]
 
     if "accent_status" in tasks:
         has_att_based_model = isinstance(
-            model.decoders["accent_status"], AttentionBasedLSTMDecoder
+            cast(DecoderModule, model.decoders["accent_status"]),
+            AttentionBasedLSTMDecoder,
         )
     else:
         has_att_based_model = False
@@ -125,25 +131,26 @@ def test_model(
     total_logs = {task: {} for task in tasks}
 
     for batch_index, (inputs, outputs, _, script_ids) in enumerate(
-        tqdm(dataloader, desc=f"{phase}: ", leave=False)
+        tqdm(phase_dataloader, desc=f"{phase}: ", leave=False)
     ):
         # pack inputs to device
         inputs = pack_inputs(inputs, config.data.input_keys, device)
         outputs = pack_outputs(outputs, device)
 
-        prev_decoder_output = {}
+        prev_decoder_output: dict[str, torch.Tensor] = {}
 
         for task_index, task in enumerate(tasks):
             output, output_mask = outputs[task]["label"], outputs[task]["mask"]
             decoder_outputs = model(task, **inputs)
+            decoder = cast(DecoderModule, model.decoders[task])
 
             # predict
-            if isinstance(model.decoders[task], CRFDecoder):
+            if isinstance(decoder, CRFDecoder):
                 _, crf_logits = decoder_outputs
                 logits = crf_logits
-            elif isinstance(model.decoders[task], LinearDecoder):
+            elif isinstance(decoder, LinearDecoder):
                 logits = decoder_outputs
-            elif isinstance(model.decoders[task], AttentionBasedLSTMDecoder):
+            else:
                 logits, attentions, ap_lengths = decoder_outputs
 
                 # plot attention when first batch on test
@@ -214,15 +221,16 @@ def test_model(
     return total_logs
 
 
-def entry(argv=sys.argv):
+def entry(argv: list[str] = sys.argv) -> None:
     global logger
     args = get_parser().parse_args(argv[1:])
     logger = getLogger(args.verbose)
     logger.debug(f"Loaded parameters: {args}")
+    assert logger is not None
 
     init_seed(args.random_seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     checkpoint_dir = args.checkpoint_dir
 
@@ -234,12 +242,12 @@ def entry(argv=sys.argv):
     if not checkpoint_config_path.exists():
         raise FileNotFoundError("config file not found")
 
-    checkpoint_config = OmegaConf.load(checkpoint_config_path)
+    checkpoint_config = cast(DictConfig, OmegaConf.load(checkpoint_config_path))
 
     logger.info("Loaded config")
     logger.info(checkpoint_config)
 
-    if args.data_dir:
+    if args.data_dir is not None:
         checkpoint_config.data.data_dir = str(args.data_dir)
 
     checkpoint_config.data.num_workers = args.n_jobs
@@ -248,7 +256,7 @@ def entry(argv=sys.argv):
     dataloader = load_dataset(checkpoint_config, phases=["test"])
     tasks = checkpoint_config.data.output_keys
 
-    if args.out_dir:
+    if args.out_dir is not None:
         log_dir = Path(args.out_dir)
     else:
         log_dir = Path("logs") / checkpoint_dir.name
@@ -259,7 +267,7 @@ def entry(argv=sys.argv):
     log_path = log_dir / f"{checkpoint_dir.name}_test_log.json"
 
     # init feature set
-    if args.vocab_path:
+    if args.vocab_path is not None:
         if args.vocab_path.exists():
             feature_set = FeatureSet(
                 args.vocab_path,

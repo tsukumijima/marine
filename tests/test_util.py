@@ -1,6 +1,7 @@
 import importlib.resources as importlib_resources
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -18,21 +19,22 @@ from marine.data.feature.feature_table import (
     parse_accent_con_type,
 )
 from marine.models.util import init_model
+from marine.types import AccentRepresentMode, MarineLabel, NJDFeature
 from marine.utils.openjtalk_util import (
     convert_njd_feature_to_marine_feature,
     convert_open_jtalk_format_label,
 )
 from marine.utils.util import (
-    _calculate_multiple_task_scores,
-    _convert_ap_based_accent_to_mora_based_accent,
+    calculate_multiple_task_scores,
     convert_label_by_accent_representation_model,
+    convert_single_ap_based_accent_to_mora_based_accent,
     expand_word_label_to_mora,
     get_accent_nucleus_in_binary_accent_stauts_seq,
     get_accent_nucleus_in_high_low_accent_stauts_seq,
 )
 
 
-BASE_DIR = Path(importlib_resources.files("marine"))
+BASE_DIR = Path(str(importlib_resources.files("marine")))
 
 
 @pytest.fixture
@@ -60,7 +62,7 @@ def default_vocab_path() -> Path:
 
 
 @pytest.fixture
-def test_log_sample() -> dict:
+def test_log_sample() -> dict[str, Any]:
     logs = None
     sample_path = BASE_DIR.parent / "tests" / "samples" / "test_log_sample.json"
     with open(sample_path, encoding="utf-8") as file:
@@ -241,17 +243,17 @@ def test_accent_conversion():
             np.array([0, 1, 1, 1]),
         ),
     ]:
-        mora_accents = _convert_ap_based_accent_to_mora_based_accent(
+        mora_accents = convert_single_ap_based_accent_to_mora_based_accent(
             ap_accents,
             accent_phrase_boundaries,
-            accent_represent_mode,
+            cast(AccentRepresentMode, accent_represent_mode),
             moras,
         )
 
         assert np.all(mora_accents == expected)
 
 
-def test_multiple_task_score_calculation(test_log_sample):
+def test_multiple_task_score_calculation(test_log_sample: dict[str, Any]) -> None:
     tasks = ["intonation_phrase_boundary", "accent_phrase_boundary", "accent_status"]
     expected_scores = {
         "intonation_phrase_boundary+accent_phrase_boundary+accent_status": 0.5203101920236337,
@@ -259,7 +261,7 @@ def test_multiple_task_score_calculation(test_log_sample):
         "accent_phrase_boundary+accent_status": 0.6790989660265879,
     }
 
-    scores = _calculate_multiple_task_scores(tasks, test_log_sample)
+    scores = calculate_multiple_task_scores(tasks, test_log_sample)
 
     # verify multiple task key is correct
     assert scores.keys() == expected_scores.keys()
@@ -272,7 +274,7 @@ def test_multiple_task_score_calculation(test_log_sample):
         )
 
 
-def test_init_model(default_config, default_vocab_path):
+def test_init_model(default_config: DictConfig, default_vocab_path: Path) -> None:
     """Verify init_model() works with default config."""
     feature_set = FeatureSet(default_vocab_path)
 
@@ -302,14 +304,22 @@ def test_init_model(default_config, default_vocab_path):
             False,
         ),
     ]:
-        output = init_model(
-            task_group, default_config, feature_set, device="cpu", is_train=is_train
-        )
-
-        if is_train:
-            model, _, _, _ = output
+        if is_train is True:
+            model, _, _, _ = init_model(
+                task_group,
+                default_config,
+                feature_set,
+                device="cpu",
+                is_train=True,
+            )
         else:
-            model = output
+            model = init_model(
+                task_group,
+                default_config,
+                feature_set,
+                device="cpu",
+                is_train=False,
+            )
 
         print(model)
 
@@ -445,7 +455,9 @@ def test_convert_njd_feature_to_marine_feature():
             ],
         ),
     ]:
-        results = convert_njd_feature_to_marine_feature(features)
+        results = convert_njd_feature_to_marine_feature(
+            cast(list[NJDFeature], features)
+        )
         assert results == expect
 
 
@@ -518,7 +530,9 @@ def test_convert_open_jtalk_format_label():
             },
         ),
     ]:
-        result = convert_open_jtalk_format_label(labels, morph_boundary)
+        result = convert_open_jtalk_format_label(
+            cast(MarineLabel, labels), morph_boundary
+        )
         assert result == expect
 
 
@@ -602,8 +616,8 @@ def test_convert_label_by_accent_representation_model():
             accent,
             accent_phrase_boundary,
             mora,
-            current_accent_represent_mode,
-            target_accent_represent_mode,
+            cast(AccentRepresentMode, current_accent_represent_mode),
+            cast(AccentRepresentMode, target_accent_represent_mode),
             binary_accent_nucleus_label=1,
             high_low_accent_nucleus_label=0,
             accent_phrase_boundary_label=1,

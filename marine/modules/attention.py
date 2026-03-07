@@ -1,28 +1,39 @@
 import torch
-from torch import nn
+from torch import Tensor, nn
 from torch.nn import functional as F
 
 
 class ZoneOutCell(nn.Module):
-    def __init__(self, cell, zoneout=0.1):
+    hidden_size: int
+
+    def __init__(self, cell: nn.LSTMCell, zoneout: float = 0.1) -> None:
         super().__init__()
         self.cell = cell
         self.hidden_size = cell.hidden_size
         self.zoneout = zoneout
 
-    def forward(self, inputs, hidden):
+    def forward(
+        self,
+        inputs: Tensor,
+        hidden: tuple[Tensor, Tensor],
+    ) -> tuple[Tensor, Tensor]:
         next_hidden = self.cell(inputs, hidden)
         next_hidden = self._zoneout(hidden, next_hidden, self.zoneout)
         return next_hidden
 
-    def _zoneout(self, h, next_h, prob):
+    def _zoneout(
+        self,
+        h: tuple[Tensor, Tensor],
+        next_h: tuple[Tensor, Tensor],
+        prob: float,
+    ) -> tuple[Tensor, Tensor]:
         h_0, c_0 = h
         h_1, c_1 = next_h
         h_1 = self._apply_zoneout(h_0, h_1, prob)
         c_1 = self._apply_zoneout(c_0, c_1, prob)
         return h_1, c_1
 
-    def _apply_zoneout(self, h, next_h, prob):
+    def _apply_zoneout(self, h: Tensor, next_h: Tensor, prob: float) -> Tensor:
         if self.training:
             mask = h.new(*h.size()).bernoulli_(prob)
             return mask * h + (1 - mask) * next_h
@@ -39,7 +50,12 @@ class BahdanauAttention(nn.Module):
         hidden_dim (int): dimension of hidden state
     """
 
-    def __init__(self, encoder_dim=512, decoder_dim=1024, hidden_dim=128):
+    def __init__(
+        self,
+        encoder_dim: int = 512,
+        decoder_dim: int = 1024,
+        hidden_dim: int = 128,
+    ) -> None:
         super().__init__()
         self.mlp_enc = nn.Linear(encoder_dim, hidden_dim)
         self.mlp_dec = nn.Linear(decoder_dim, hidden_dim, bias=False)
@@ -47,16 +63,16 @@ class BahdanauAttention(nn.Module):
 
         self.processed_memory = None
 
-    def reset(self):
+    def reset(self) -> None:
         """Reset the internal buffer"""
         self.processed_memory = None
 
     def forward(
         self,
-        encoder_outs,
-        decoder_state,
-        mask=None,
-    ):
+        encoder_outs: Tensor,
+        decoder_state: Tensor,
+        mask: Tensor | None = None,
+    ) -> tuple[Tensor, Tensor]:
         """Forward step
         Args:
             encoder_outs (torch.FloatTensor): encoder outputs

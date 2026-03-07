@@ -1,10 +1,9 @@
 from collections.abc import Callable
 
 import torch
-from torch.nn.modules.loss import _Loss
 
 
-class LogLikelhood(_Loss):
+class LogLikelhood(torch.nn.Module):
     def __init__(
         self,
         log_likehood_func: Callable[

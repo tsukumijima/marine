@@ -1,9 +1,11 @@
 import argparse
 import json
+import logging
 import sys
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import cpu_count
 from pathlib import Path
+from typing import Any
 
 from tqdm import tqdm
 
@@ -16,10 +18,10 @@ from marine.utils.util import load_json_corpus
 # download and apply OpenJTalk dictionaries
 download_and_apply_dictionaries()
 
-logger = None
+logger: logging.Logger | None = None
 
 
-def get_parser():
+def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Convert Special format txt format data to json file",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -37,14 +39,14 @@ def get_parser():
     return parser
 
 
-def extract_feature(script_id, text):
-    features = {"script_id": script_id, "nodes": []}
+def extract_feature(script_id: str, text: str) -> dict[str, Any]:
+    features: dict[str, Any] = {"script_id": script_id, "nodes": []}
 
     try:
         from pyopenjtalk import run_frontend
     except BaseException:
         raise ImportError(
-            'Please install pyopenjtalk by `pip install -e ".[dev,pyopenjtalk]"`'
+            "Please install pyopenjtalk by `uv sync --extra pyopenjtalk --group dev`"
         )
 
     # drop full-context label
@@ -54,11 +56,11 @@ def extract_feature(script_id, text):
     return features
 
 
-def _sort_corpus_by_script_id(corpus):
-    return list(sorted(corpus, key=lambda x: x["script_id"]))
+def _sort_corpus_by_script_id(corpus: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return list(sorted(corpus, key=lambda item: item["script_id"]))
 
 
-def entry(argv=sys.argv):
+def entry(argv: list[str] = sys.argv) -> None:
     global logger
 
     args = get_parser().parse_args(argv[1:])
