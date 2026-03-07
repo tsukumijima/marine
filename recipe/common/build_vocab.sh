@@ -2,4 +2,4 @@
 #     . script.sh
 # Please don't try to run the shell directly.
 
-marine-build-vocab $feature_file_dir $vocab_dir -m $vocab_min_freq
+uv run task build-vocab -- $feature_file_dir $vocab_dir -m $vocab_min_freq

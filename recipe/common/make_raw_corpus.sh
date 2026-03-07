@@ -2,4 +2,4 @@
 #     . script.sh
 # Please don't try to run the shell directly.
 
-marine-make-raw-corpus $jsut_script_path $raw_corpus_dir --accent_status_seq_level $accent_status_seq_level --accent_status_represent_mode $accent_status_represent_mode
+uv run task make-raw-corpus -- $jsut_script_path $raw_corpus_dir --accent_status_seq_level $accent_status_seq_level --accent_status_represent_mode $accent_status_represent_mode

@@ -8,4 +8,4 @@ else
     cmd_args="--target_id_dir $exist_target_id_dir"
 fi
 
-marine-pack-corpus $raw_corpus_dir $feature_file_dir $vocab_path $feature_pack_dir -s $accent_status_seq_level -f $feature_table_key $cmd_args
+uv run task pack-corpus -- $raw_corpus_dir $feature_file_dir $vocab_path $feature_pack_dir -s $accent_status_seq_level -f $feature_table_key $cmd_args
