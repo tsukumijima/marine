@@ -1,2 +1,7 @@
 include README.md LICENSE
-recursive-include marine *.py *.yaml *.tsv
+recursive-include marine/dict *.tsv
+prune marine/bin/conf
+prune marine/data/dictionaries
+prune recipe
+prune tests
+global-exclude __pycache__ *.py[cod]

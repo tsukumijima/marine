@@ -14,7 +14,7 @@ marine-plus は、主に Windows 対応や新しい Python バージョンのサ
 pip install marine-plus
 ```
 
-下記のドキュメントは、[marine](https://github.com/6gsn/marine) 本家のドキュメントを改変なしでそのまま引き継いでいます。  
+下記のドキュメントは、[marine](https://github.com/6gsn/marine) 本家のドキュメントを、一部改変した上でそのまま引き継いでいます。  
 これらのドキュメントの内容が marine-plus にも通用するかは保証されません。
 
 -------
@@ -47,16 +47,18 @@ The model included in this package is trained using [JSUT corpus](https://sites.
 
 ## Get started
 
-### Installation
+### Installation for users
 
 ```shell
-$ pip install marine
+$ pip install marine-plus
 ```
 
 ### For development
 
 ```shell
-$ pip install -e ".[dev]"
+$ pip install uv
+$ uv venv
+$ uv sync --extra pyopenjtalk --group dev
 ```
 
 ### Quick demo
