@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from logging import getLogger
 from pathlib import Path
 from typing import Any, cast
@@ -16,6 +17,7 @@ from marine.utils.g2p_util import pron2mora
 
 
 logger = getLogger(__name__)
+FEATURE_ID_DTYPE = np.int64
 
 
 class FeatureSet:
@@ -81,8 +83,8 @@ class FeatureSet:
             self.id_to_feature[key] = id_to_feature
 
     def convert_feature_to_id(
-        self, feature_key: str, features: list[str | int]
-    ) -> NDArray[np.uint8]:
+        self, feature_key: str, features: Sequence[str | int]
+    ) -> NDArray[np.int64]:
         if feature_key not in self.feature_to_id:
             raise ValueError(
                 f"Not initialized feature key: the key must be one of {self.feature_to_id}"
@@ -95,10 +97,14 @@ class FeatureSet:
                 )
                 for value in features
             ],
-            dtype=np.uint8,
+            dtype=FEATURE_ID_DTYPE,
         )
 
-    def convert_id_to_feature(self, feature_key: str, ids: list[int]) -> NDArray[Any]:
+    def convert_id_to_feature(
+        self,
+        feature_key: str,
+        ids: Sequence[int] | NDArray[np.int64],
+    ) -> NDArray[Any]:
         if feature_key not in self.id_to_feature:
             raise ValueError(
                 f"Not initialized feature key: the key must be one of {self.id_to_feature}"
@@ -113,24 +119,21 @@ class FeatureSet:
 
     def convert_nodes_to_feature(self, nodes: list[MarineFeature]) -> BatchFeature:
         """
-        Input: dict型のリスト
-        example:
-        [
-          {
-            "surface": "今回",
-            "pron": "コンカイ",
-            "pos": "名詞:副詞可能:*:*",
-            "c_type": "*",
-            "c_form": "*",
-            "accent_type": 1,
-            "accent_con_type": "C1",
-            "chain_flag": -1
-          },
-          ...
-        ]
+        形態素列を埋め込み用の BatchFeature に変換する。
+
+        Args:
+            nodes (list[MarineFeature]): 形態素情報のリスト。各要素は surface, pron, pos,
+                c_type, c_form, accent_type, accent_con_type, chain_flag を持つ辞書。
+
+        Returns:
+            BatchFeature: 特徴量キーをキー、NDArray を値とする辞書
         """
 
-        features = {key: np.array([], dtype=np.uint8) for key in self.feature_to_id}
+        # Feature IDs are consumed by embedding layers as integer indices.
+        # They must preserve the original vocabulary index without overflow.
+        features: dict[str, NDArray[Any]] = {
+            key: np.array([], dtype=FEATURE_ID_DTYPE) for key in self.feature_to_id
+        }
 
         # init morph boundary for inference
         features["morph_boundary"] = np.array([], dtype=np.uint8)
@@ -163,9 +166,7 @@ class FeatureSet:
                 else:
                     value = node[key]
                 feature = table.get(value, table[self.unk_token])
-                # Convert to numpy array first, then cast to uint8 to maintain
-                # the same overflow behavior (avoid deprecation warning)
-                feature = np.array([feature] * len(mora)).astype(np.uint8)
+                feature = np.full(len(mora), feature, dtype=FEATURE_ID_DTYPE)
                 features[key] = np.concatenate([features[key], feature], axis=0)
 
         # First Mora could not be boundary
