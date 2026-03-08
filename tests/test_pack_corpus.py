@@ -289,8 +289,52 @@ def test_remap_labels_by_mora_alignment_accepts_small_insertion() -> None:
     assert remapped_labels["accent_phrase_boundary"] == [0, 0, 0, 0, 1]
 
 
-def test_process_drops_ap_label_length_mismatch_safely() -> None:
-    """AP ラベルでは非 punctuation の長さ不一致を無理に救済しないことを確認する。"""
+def test_process_drops_ap_label_length_mismatch_when_ap_count_cannot_match() -> None:
+    """AP 数の整合が取れない場合は、長さ不一致を救済しないことを確認する。"""
+
+    vocab_path = (
+        Path(__file__).resolve().parent.parent
+        / "recipe"
+        / "common"
+        / "database"
+        / "20220912_jsut_vocab_min_2"
+        / "vocab.pkl"
+    )
+    feature_set = FeatureSet(vocab_path, feature_table_key="open-jtalk")
+    nodes = cast(
+        list[MarineFeature],
+        [
+            {
+                "surface": "入れ",
+                "pron": "イレ",
+                "pos": "動詞:自立:*:*",
+                "c_type": "*",
+                "c_form": "*",
+                "accent_type": 0,
+                "accent_con_type": "*",
+                "chain_flag": 0,
+            },
+        ],
+    )
+
+    packed_item, wrong_mora_info = process(
+        nodes,
+        feature_set,
+        "ap",
+        script_id="test-script",
+        surface="入れ",
+        pron="ハイレ",
+        accent_status="1,2",
+        accent_phrase_boundary="0,0,0",
+        intonation_phrase_boundary="0,0,0",
+    )
+
+    assert packed_item is None
+    assert wrong_mora_info == "test-script|イレ|ハイレ\n"
+
+
+def test_process_remaps_ap_boundary_labels_without_touching_ap_accent() -> None:
+    """AP ラベルでは accent_status を保ったまま境界ラベルだけを再配置できることを確認する。"""
 
     vocab_path = (
         Path(__file__).resolve().parent.parent
@@ -329,8 +373,77 @@ def test_process_drops_ap_label_length_mismatch_safely() -> None:
         intonation_phrase_boundary="0,0,0",
     )
 
-    assert packed_item is None
-    assert wrong_mora_info == "test-script|イレ|ハイレ\n"
+    assert packed_item is not None
+    assert wrong_mora_info is None
+    _, _, labels = packed_item
+    assert labels["accent_status"].tolist() == [1]
+    assert labels["accent_phrase_boundary"].tolist() == [0, 0]
+
+
+def test_process_accepts_ap_label_when_ap_boundary_count_matches() -> None:
+    """AP ラベルでは accent phrase 数と accent 数が一致すれば正常に pack できることを確認する。"""
+
+    vocab_path = (
+        Path(__file__).resolve().parent.parent
+        / "recipe"
+        / "common"
+        / "database"
+        / "20220912_jsut_vocab_min_2"
+        / "vocab.pkl"
+    )
+    feature_set = FeatureSet(vocab_path, feature_table_key="open-jtalk")
+    nodes = cast(
+        list[MarineFeature],
+        [
+            {
+                "surface": "水",
+                "pron": "ミズ",
+                "pos": "名詞:一般:*:*",
+                "c_type": "*",
+                "c_form": "*",
+                "accent_type": 0,
+                "accent_con_type": "*",
+                "chain_flag": 0,
+            },
+            {
+                "surface": "を",
+                "pron": "オ",
+                "pos": "助詞:格助詞:一般:*",
+                "c_type": "*",
+                "c_form": "*",
+                "accent_type": 0,
+                "accent_con_type": "*",
+                "chain_flag": 1,
+            },
+            {
+                "surface": "買う",
+                "pron": "カウ",
+                "pos": "動詞:自立:*:*",
+                "c_type": "五段・ワ行促音便",
+                "c_form": "基本形",
+                "accent_type": 0,
+                "accent_con_type": "*",
+                "chain_flag": 0,
+            },
+        ],
+    )
+
+    packed_item, wrong_mora_info = process(
+        nodes,
+        feature_set,
+        "ap",
+        script_id="test-script",
+        surface="水を買う",
+        pron="ミズオカウ",
+        accent_status="1,2",
+        accent_phrase_boundary="0,0,1,0,0",
+        intonation_phrase_boundary="0,0,0,0,0",
+    )
+
+    assert packed_item is not None
+    assert wrong_mora_info is None
+    _, _, labels = packed_item
+    assert labels["accent_status"].tolist() == [1, 2]
 
 
 def test_process_remaps_same_length_rescued_reading(

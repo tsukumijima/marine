@@ -765,6 +765,51 @@ def _remap_labels_by_mora_alignment(
     return remapped_labels
 
 
+def _remap_ap_labels_by_mora_alignment(
+    extracted_moras: list[str],
+    expected_moras: list[str],
+    original_labels: dict[str, list[int]],
+) -> dict[str, list[int]] | None:
+    """
+    AP 単位の accent_status を保持したまま、モーラ単位ラベルだけを extracted 側へ写像する。
+
+    Args:
+        extracted_moras (list[str]): OpenJTalk 由来のモーラ列
+        expected_moras (list[str]): dataset 側モーラ列
+        original_labels (dict[str, list[int]]): dataset 側ラベル列
+
+    Returns:
+        dict[str, list[int]] | None: AP ラベル整合性まで保てる場合は remap 後のラベル列。安全に写像できない場合は None。
+    """
+
+    mora_level_labels = {
+        label_key: label_values
+        for label_key, label_values in original_labels.items()
+        if label_key != "accent_status"
+    }
+    remapped_mora_level_labels = _remap_labels_by_mora_alignment(
+        extracted_moras,
+        expected_moras,
+        mora_level_labels,
+    )
+    if remapped_mora_level_labels is None:
+        return None
+
+    remapped_labels = {
+        **original_labels,
+        **remapped_mora_level_labels,
+    }
+    accent_phrase_boundaries = np.asarray(
+        remapped_labels["accent_phrase_boundary"],
+        dtype=np.uint8,
+    )
+    num_boundary = np.count_nonzero(accent_phrase_boundaries == AP_BOUNDARY_LABEL) + 1
+    if len(remapped_labels["accent_status"]) != num_boundary:
+        return None
+
+    return remapped_labels
+
+
 def is_surface_aligned_mora_sequence(
     nodes: list[MarineFeature],
     expected_moras: list[str],
@@ -938,23 +983,18 @@ def process(
         expected_moras,
     )
     remapped_labels = None
-    should_remap_labels = (
-        required_ap_accent is not True and extracted_moras != expected_moras
-    )
-
-    if should_remap_labels is True:
+    if required_ap_accent is True and extracted_moras != expected_moras:
+        remapped_labels = _remap_ap_labels_by_mora_alignment(
+            extracted_moras,
+            expected_moras,
+            _original_labels,
+        )
+    elif extracted_moras != expected_moras:
         remapped_labels = _remap_labels_by_mora_alignment(
             extracted_moras,
             expected_moras,
             _original_labels,
         )
-
-    # AP-based accent labels are defined per accent phrase, not per mora.
-    # Therefore, if the non-punctuation mora length differs, we cannot
-    # safely remap the labels with the mora-level alignment heuristic.
-    if required_ap_accent is True and len(extracted_moras) != len(expected_moras):
-        is_softmatched = False
-        is_surface_aligned = False
 
     if (
         is_softmatched is True
@@ -991,15 +1031,19 @@ def process(
                 and key == "accent_status"
                 and "accent_phrase_boundary" in pending_labels.keys()
             ):
+                accent_phrase_boundaries = np.asarray(
+                    _original_labels["accent_phrase_boundary"],
+                    dtype=np.uint8,
+                )
                 num_boundary = (
                     np.count_nonzero(
-                        _original_labels["accent_phrase_boundary"] == AP_BOUNDARY_LABEL
+                        accent_phrase_boundaries == AP_BOUNDARY_LABEL
                     )
                     + 1
                 )
                 accents = _original_labels["accent_status"]
                 assert len(accents) == num_boundary, (
-                    "Unmatched length of sequnce between ac and ap"
+                    "Unmatched length of sequence between accent and accent phrase"
                 )
                 labels["accent_status"] = np.array(
                     _original_labels["accent_status"], dtype=np.uint8

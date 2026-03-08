@@ -30,7 +30,7 @@ exist_target_id_dir=""  # 常に再構築
 
 . $COMMON_ROOT/parse_options.sh || exit 1
 
-# Parepare output files
+# Prepare output files
 output_root=$output_dir/$tag
 mkdir -p $output_root
 

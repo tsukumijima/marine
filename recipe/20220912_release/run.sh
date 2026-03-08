@@ -30,7 +30,7 @@ exist_target_id_dir=$COMMON_ROOT/database/20220912_jsut_script_ids
 
 . $COMMON_ROOT/parse_options.sh || exit 1
 
-# Parepare output files
+# Prepare output files
 output_root=$output_dir/$tag
 mkdir -p $output_root
 
