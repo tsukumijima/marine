@@ -6,7 +6,7 @@
 /checkpoint
 
 # Recipe related
-recipe*/*/data*
+# recipe*/*/data*
 recipe*/*/downloads
 recipe*/*/tensorboard
 recipe*/*/outputs
