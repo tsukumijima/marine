@@ -6,7 +6,7 @@ checkpoint_interval: 5
 save_optimizer_state: true
 save_test_log: true
 save_vocab_path: true
-upload_tensorborad_event: true
+upload_tensorboard_event: true
 
 gpus: 1
 
