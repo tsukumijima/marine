@@ -19,7 +19,7 @@ from marine.data.feature.feature_table import (
     parse_accent_con_type,
 )
 from marine.models.util import init_model
-from marine.types import AccentRepresentMode, MarineLabel, NJDFeature
+from marine.types import AccentRepresentMode, MarineFeature, MarineLabel, NJDFeature
 from marine.utils.openjtalk_util import (
     convert_njd_feature_to_marine_feature,
     convert_open_jtalk_format_label,
@@ -534,6 +534,41 @@ def test_convert_open_jtalk_format_label():
             cast(MarineLabel, labels), morph_boundary
         )
         assert result == expect
+
+
+def test_feature_set_preserves_large_surface_ids(default_vocab_path: Path) -> None:
+    feature_set = FeatureSet(
+        default_vocab_path,
+        feature_table_key="open-jtalk",
+        feature_keys=[
+            "mora",
+            "surface",
+            "pos",
+            "c_type",
+            "c_form",
+            "accent_type",
+            "accent_con_type",
+        ],
+    )
+    nodes = [
+        {
+            "surface": "マレーシア",
+            "pron": "マレーシア",
+            "pos": "名詞:固有名詞:地域:国",
+            "c_type": "*",
+            "c_form": "*",
+            "accent_type": 2,
+            "accent_con_type": "C1",
+            "chain_flag": 0,
+        },
+    ]
+
+    surface_id = feature_set.feature_to_id["surface"]["マレーシア"]
+    features = feature_set.convert_nodes_to_feature(cast(list[MarineFeature], nodes))
+
+    assert surface_id > np.iinfo(np.uint8).max
+    assert features["surface"].dtype == np.int64
+    assert np.all(features["surface"] == surface_id)
 
 
 def test_get_accent_nucleus_in_binary_accent_stauts_seq():

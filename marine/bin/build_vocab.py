@@ -42,7 +42,6 @@ def get_parser() -> argparse.ArgumentParser:
 
 
 def count_words(words: Sequence[str]) -> list[tuple[str, int]]:
-
     def _get_frequency_value(item: tuple[str, int]) -> int:
         return item[1]
 

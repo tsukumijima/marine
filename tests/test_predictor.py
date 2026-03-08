@@ -1,4 +1,7 @@
+from pathlib import Path
+
 import pytest
+import torch
 
 from marine.predict import Predictor
 from marine.types import MarineFeature
@@ -155,4 +158,36 @@ def test_predict(predictor: Predictor) -> None:
             accent_represent_mode="binary",
             require_open_jtalk_format=True,
         )
+    )
+
+
+def test_predictor_accepts_path_arguments(predictor: Predictor) -> None:
+    """Path 型の引数でも Predictor を初期化できることを確認する。"""
+
+    path_predictor = Predictor(
+        model_dir=Path(predictor.model_dir),
+        postprocess_vocab_dir=Path(predictor.postprocess_vocab_dir),
+    )
+
+    assert path_predictor.model_dir == predictor.model_dir
+    assert path_predictor.postprocess_vocab_dir == predictor.postprocess_vocab_dir
+
+
+def test_pad_annotate_label_accepts_tensor_labels(predictor: Predictor) -> None:
+    """Tensor のラベル列でも pad_annotate_label() が処理できることを確認する。"""
+
+    result = predictor.pad_annotate_label(
+        {
+            "accent_phrase_boundary": {
+                "token_type": "mora",
+                "labels": [torch.tensor([0, 1, 0], dtype=torch.int64)],
+            },
+        },
+        mora=[["ミ", "ズ", "ワ"]],
+        morph_boundary=[],
+    )
+
+    assert torch.equal(
+        result["accent_phrase_boundary"],
+        torch.tensor([[0, 1, 0]], device=result["accent_phrase_boundary"].device),
     )
