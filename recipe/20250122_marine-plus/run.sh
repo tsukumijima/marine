@@ -78,7 +78,7 @@ fi
 
 if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ] && [ -z ${exist_feature_dir} ]; then
     echo "stage 2: Extract feature"
-    python $MARINE_ROOT/marine/bin/prepare_features_pyopenjtalk.py $raw_corpus_dir $feature_file_dir
+    uv run task prepare-features-pyopenjtalk -- $raw_corpus_dir $feature_file_dir
 fi
 
 if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ] && [ -z ${exist_vocab_dir} ]; then
