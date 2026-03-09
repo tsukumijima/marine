@@ -84,7 +84,7 @@ jobs:
         uv pip install "${{ matrix.numpy-spec }}" --group dev -e ".[pyopenjtalk]"
     - name: Check dependency resolution
       run: |
-        uv run python -m pip check
+        uv pip check
     - name: Lint with Ruff
       run: |
         uv run ruff check .
