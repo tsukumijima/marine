@@ -1,5 +1,7 @@
 import argparse
 import csv
+import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -8,9 +10,12 @@ import yaml
 from marine.utils.openjtalk_util import print_diff_hl
 
 
+RECIPE_NAME_PATTERN = re.compile(r"^[^/]+$")
+
+
 def get_parser() -> argparse.ArgumentParser:
     """
-    `wrong_mora_info.csv` の可視化用 CLI 引数を生成する。
+    `wrong_mora_info.csv` 可視化 CLI の引数を生成する。
 
     Returns:
         argparse.ArgumentParser: 引数パーサー
@@ -20,56 +25,70 @@ def get_parser() -> argparse.ArgumentParser:
         description="Visualize diff between OpenJTalk mora output and manual annotation.",
     )
     parser.add_argument(
-        "wrong_mora_info_path",
-        nargs="?",
+        "recipe_name",
+        type=str,
+        help="Recipe name under the recipe directory, or an absolute recipe path.",
+    )
+    parser.add_argument(
+        "--wrong-mora-info-path",
         type=Path,
         default=None,
-        help="Path to wrong_mora_info.csv. If omitted, discover it from the recipe directory.",
+        help="Optional explicit path to wrong_mora_info.csv.",
     )
     parser.add_argument(
         "--text-yaml-path",
         type=Path,
         default=None,
-        help="Path to text.yaml. Defaults to data/text.yaml under this recipe.",
+        help="Optional explicit path to text.yaml.",
     )
     return parser
 
 
-def discover_wrong_mora_info_path(recipe_dir: Path) -> Path:
+def resolve_recipe_dir(recipe_name: str) -> Path:
     """
-    レシピ配下から `wrong_mora_info.csv` の既定位置を探索する。
+    recipe 名または絶対パスから recipe ディレクトリを解決する。
 
     Args:
-        recipe_dir (Path): 対象レシピのディレクトリ
+        recipe_name (str): recipe 名または絶対パス
+
+    Returns:
+        Path: 解決した recipe ディレクトリ
+    """
+
+    recipe_path = Path(recipe_name)
+    if recipe_path.is_absolute() is True:
+        return recipe_path
+
+    if RECIPE_NAME_PATTERN.match(recipe_name) is None:
+        raise ValueError(f"Invalid recipe name: {recipe_name}")
+
+    return Path(__file__).resolve().parents[2] / "recipe" / recipe_name
+
+
+def discover_wrong_mora_info_path(recipe_dir: Path) -> Path:
+    """
+    recipe 配下から `wrong_mora_info.csv` を探索する。
+
+    Args:
+        recipe_dir (Path): 対象 recipe ディレクトリ
 
     Returns:
         Path: 発見した `wrong_mora_info.csv` のパス
-
-    Raises:
-        FileNotFoundError: `wrong_mora_info.csv` を発見できなかった場合
     """
 
-    candidate_paths: list[Path] = []
-
-    legacy_path = recipe_dir / "wrong_mora_info.csv"
-    if legacy_path.exists() is True:
-        candidate_paths.append(legacy_path)
-
-    feature_pack_paths = sorted(
+    candidate_paths = sorted(
         recipe_dir.glob("outputs/*/feature_pack/wrong_mora_info.csv"),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
-    candidate_paths.extend(feature_pack_paths)
+
+    legacy_path = recipe_dir / "wrong_mora_info.csv"
+    if legacy_path.exists() is True:
+        candidate_paths.insert(0, legacy_path)
 
     if len(candidate_paths) == 0:
-        searched_locations = [
-            recipe_dir / "wrong_mora_info.csv",
-            recipe_dir / "outputs" / "*" / "feature_pack" / "wrong_mora_info.csv",
-        ]
         raise FileNotFoundError(
-            "wrong_mora_info.csv was not found. "
-            f"Searched locations: {searched_locations}",
+            f"wrong_mora_info.csv was not found under the recipe: {recipe_dir}"
         )
 
     return candidate_paths[0]
@@ -77,7 +96,7 @@ def discover_wrong_mora_info_path(recipe_dir: Path) -> Path:
 
 def load_text_data(text_yaml_path: Path) -> dict[str, dict[str, Any]]:
     """
-    `text.yaml` を読み込み、script id ごとのテキスト辞書へ変換する。
+    `text.yaml` を script id 辞書として読み込む。
 
     Args:
         text_yaml_path (Path): `text.yaml` のパス
@@ -92,21 +111,22 @@ def load_text_data(text_yaml_path: Path) -> dict[str, dict[str, Any]]:
     if loaded_text_data is None:
         return {}
 
-    return loaded_text_data
+    return dict(loaded_text_data)
 
 
 def iter_wrong_mora_rows(wrong_mora_info_path: Path) -> list[dict[str, str]]:
     """
-    `wrong_mora_info.csv` の各行を辞書として読み込む。
+    `wrong_mora_info.csv` を辞書リストとして読み込む。
 
     Args:
         wrong_mora_info_path (Path): `wrong_mora_info.csv` のパス
 
     Returns:
-        list[dict[str, str]]: `wav`, `jtalk`, `annotation` を持つ辞書の一覧
+        list[dict[str, str]]: `wav`, `jtalk`, `annotation` を持つ辞書一覧
     """
 
     rows: list[dict[str, str]] = []
+
     with open(wrong_mora_info_path, encoding="utf-8") as file:
         reader = csv.reader(file, delimiter="|")
         for row in reader:
@@ -124,17 +144,25 @@ def iter_wrong_mora_rows(wrong_mora_info_path: Path) -> list[dict[str, str]]:
     return rows
 
 
-def visualize_wrong_mora_diff(
-    wrong_mora_info_path: Path,
-    text_yaml_path: Path,
-) -> None:
+def main(argv: list[str] | None = None) -> None:
     """
-    `wrong_mora_info.csv` と `text.yaml` を使って mora 差分を標準出力へ表示する。
+    CLI のエントリーポイント。
 
     Args:
-        wrong_mora_info_path (Path): `wrong_mora_info.csv` のパス
-        text_yaml_path (Path): `text.yaml` のパス
+        argv (list[str] | None): コマンドライン引数
     """
+
+    parser = get_parser()
+    args = parser.parse_args(argv)
+    recipe_dir = resolve_recipe_dir(args.recipe_name)
+
+    wrong_mora_info_path = args.wrong_mora_info_path
+    if wrong_mora_info_path is None:
+        wrong_mora_info_path = discover_wrong_mora_info_path(recipe_dir)
+
+    text_yaml_path = args.text_yaml_path
+    if text_yaml_path is None:
+        text_yaml_path = recipe_dir / "data" / "text.yaml"
 
     text_data = load_text_data(text_yaml_path)
     wrong_mora_rows = iter_wrong_mora_rows(wrong_mora_info_path)
@@ -150,28 +178,5 @@ def visualize_wrong_mora_diff(
         print_diff_hl(wrong_mora_row["jtalk"], wrong_mora_row["annotation"])
 
 
-def main() -> None:
-    """
-    `wrong_mora_info.csv` 可視化 CLI のエントリーポイント。
-    """
-
-    parser = get_parser()
-    args = parser.parse_args()
-    recipe_dir = Path(__file__).resolve().parent
-
-    wrong_mora_info_path = args.wrong_mora_info_path
-    if wrong_mora_info_path is None:
-        wrong_mora_info_path = discover_wrong_mora_info_path(recipe_dir)
-
-    text_yaml_path = args.text_yaml_path
-    if text_yaml_path is None:
-        text_yaml_path = recipe_dir / "data" / "text.yaml"
-
-    visualize_wrong_mora_diff(
-        wrong_mora_info_path=wrong_mora_info_path,
-        text_yaml_path=text_yaml_path,
-    )
-
-
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
