@@ -2,6 +2,11 @@ from logging import getLogger
 
 from marine.utils.g2p_util.accent import set_accent_status
 from marine.utils.g2p_util.g2p import pron2mora, pron2phon
+from marine.utils.g2p_util.util import (
+    CANONICAL_MORA_BY_PHONEMES,
+    SUPPORTED_MORA,
+    get_phoneme,
+)
 
 
 logger = getLogger("test")
@@ -174,3 +179,24 @@ def test_mora_split():
         logger.info("---------")
 
         assert moras == expected
+
+
+def test_g2p_supports_pyopenjtalk_plus_extended_moras() -> None:
+    assert pron2mora("フュクェデェシィヂャ") == ["フュ", "クェ", "デェ", "シィ", "ヂャ"]
+    assert pron2mora("グァグヮクァクヮ") == ["グァ", "グヮ", "クァ", "クヮ"]
+
+    assert get_phoneme("フュ", []) == ["fy", "u"]
+    assert get_phoneme("クェ", []) == ["kw", "e"]
+    assert get_phoneme("デェ", []) == ["dy", "e"]
+    assert get_phoneme("シィ", []) == ["s", "i"]
+    assert get_phoneme("ヒョ", []) == ["hy", "o"]
+
+    assert "フュ" in SUPPORTED_MORA
+    assert "クェ" in SUPPORTED_MORA
+    assert "グェ" in SUPPORTED_MORA
+    assert "シィ" in SUPPORTED_MORA
+    assert "ヂャ" in SUPPORTED_MORA
+
+    assert CANONICAL_MORA_BY_PHONEMES[("fy", "u")] == "フュ"
+    assert CANONICAL_MORA_BY_PHONEMES[("kw", "e")] == "クェ"
+    assert CANONICAL_MORA_BY_PHONEMES[("gw", "e")] == "グェ"

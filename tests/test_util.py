@@ -13,6 +13,7 @@ from omegaconf import DictConfig
 
 from marine.data.feature.feature_set import FeatureSet
 from marine.data.feature.feature_table import (
+    MORAS,
     is_adjective,
     is_noun,
     is_verb,
@@ -20,6 +21,7 @@ from marine.data.feature.feature_table import (
 )
 from marine.models.util import init_model
 from marine.types import AccentRepresentMode, MarineFeature, MarineLabel, NJDFeature
+from marine.utils.g2p_util.util import MORA_LIST_ADDITIONAL, MORA_LIST_MINIMUM
 from marine.utils.openjtalk_util import (
     convert_njd_feature_to_marine_feature,
     convert_open_jtalk_format_label,
@@ -366,6 +368,12 @@ def test_parse_accent_con_type():
         ("動詞%F2@0,形容詞%F2@-1,名詞%F1", "形状詞:タリ:*:*", "[UNK]"),
     ]:
         assert parse_accent_con_type(a_con_type, pos_tag) == expect
+
+
+def test_feature_table_matches_g2p_supported_moras() -> None:
+    expected_moras = [kana for kana, _, _ in MORA_LIST_MINIMUM + MORA_LIST_ADDITIONAL]
+
+    assert MORAS[:-4] == expected_moras + ["ー"]
 
 
 def test_convert_njd_feature_to_marine_feature():
