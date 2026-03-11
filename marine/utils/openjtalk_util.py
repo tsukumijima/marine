@@ -9,6 +9,10 @@ from numpy.typing import NDArray
 
 from marine.data.feature.feature_table import RAW_FEATURE_KEYS
 from marine.types import MarineFeature, MarineLabel, NJDFeature, OpenJTalkFormatLabel
+from marine.utils.util import (
+    PUNCTUATION_NORMALIZATION_TABLE,
+    normalize_punctuation_characters,
+)
 
 
 kakasi = pykakasi.kakasi()
@@ -35,14 +39,6 @@ OPEN_JTALK_FEATURE_RENAME_TABLE = {
     "accent_con_type": "chain_rule",
     "chain_flag": "chain_flag",
 }
-
-PUNCTUATION_FULL_TO_HALF_TABLE = {
-    "、": ",",
-    "。": ".",
-    "？": "?",
-    "！": "!",
-}
-PUNCTUATION_FULL_TO_HALF_TRANS = str.maketrans(PUNCTUATION_FULL_TO_HALF_TABLE)
 
 
 # TODO: pyopenjtalk から呼ばれている convert_njd_feature_to_marine_feature() とロジックが同じ (?) なので統合する
@@ -92,8 +88,8 @@ def convert_open_jtalk_node_to_feature(
 
         if node_feature["surface"] == "・":
             continue
-        elif node_feature["surface"] in PUNCTUATION_FULL_TO_HALF_TABLE.keys():
-            surface = node_feature["surface"].translate(PUNCTUATION_FULL_TO_HALF_TRANS)
+        elif node_feature["surface"] in PUNCTUATION_NORMALIZATION_TABLE:
+            surface = normalize_punctuation_characters(node_feature["surface"])
             pron = None
             node_feature["surface"] = surface
             node_feature["pron"] = pron
@@ -133,10 +129,8 @@ def convert_njd_feature_to_marine_feature(
 
         if marine_feature["surface"] == "・":
             continue
-        elif marine_feature["surface"] in PUNCTUATION_FULL_TO_HALF_TABLE.keys():
-            surface = marine_feature["surface"].translate(
-                PUNCTUATION_FULL_TO_HALF_TRANS
-            )
+        elif marine_feature["surface"] in PUNCTUATION_NORMALIZATION_TABLE:
+            surface = normalize_punctuation_characters(marine_feature["surface"])
             pron = None
             marine_feature["surface"] = surface
             marine_feature["pron"] = pron

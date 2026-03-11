@@ -12,9 +12,7 @@ MORAS = [kana for kana, _, _ in MORA_LIST_MINIMUM + MORA_LIST_ADDITIONAL] + [
     # Longvowel symbol
     "ー",
 ]
-# PUNCTUATIONS = [",", ".", "?", "!", "。", "、", "？", "！"]
-# オリジナルの事前学習モデルで推論するには PUNCTUATIONS を減らす必要がある
-# さもなければ vocal size の不一致で RuntimeError が発生する
+# 句読点・感嘆符は事前に半角に正規化してから特徴量へ入れる
 PUNCTUATIONS = [",", ".", "?", "!"]
 MORAS += PUNCTUATIONS
 

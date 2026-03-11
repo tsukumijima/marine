@@ -58,13 +58,39 @@ OPEN_JTALK_FEATURE_RENAME_TABLE = {
     "chain_flag": "chain_flag",
 }
 
-PUNCTUATION_FULL_TO_HALF_TABLE = {
+PUNCTUATION_NORMALIZATION_TABLE = {
+    ",": ",",
+    "，": ",",
     "、": ",",
+    ":": ",",
+    "：": ",",
+    ";": ",",
+    "；": ",",
+    ".": ".",
+    "．": ".",
     "。": ".",
+    "?": "?",
     "？": "?",
+    "!": "!",
     "！": "!",
 }
-PUNCTUATION_FULL_TO_HALF_TRANS = str.maketrans(PUNCTUATION_FULL_TO_HALF_TABLE)
+PUNCTUATION_NORMALIZATION_TRANS = str.maketrans(PUNCTUATION_NORMALIZATION_TABLE)
+PUNCTUATION_FULL_TO_HALF_TABLE = PUNCTUATION_NORMALIZATION_TABLE
+PUNCTUATION_FULL_TO_HALF_TRANS = PUNCTUATION_NORMALIZATION_TRANS
+
+
+def normalize_punctuation_characters(text: str) -> str:
+    """
+    句読点と終端記号を学習用の正規化された表記へ変換する。
+
+    Args:
+        text (str): 正規化対象の文字列
+
+    Returns:
+        str: 句読点を半角へ変換した文字列
+    """
+
+    return text.translate(PUNCTUATION_NORMALIZATION_TRANS)
 
 
 def init_seed(seed: int) -> None:
