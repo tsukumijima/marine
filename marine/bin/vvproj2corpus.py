@@ -269,15 +269,15 @@ def get_canonical_mora_text(mora: dict[str, Any]) -> str:
 
     phonemes = get_mora_phonemes(mora)
     expected_phonemes = tuple(phoneme for phoneme in phonemes if phoneme is not None)
-    canonical_mora = CANONICAL_MORA_BY_PHONEMES.get(expected_phonemes)
-
-    if canonical_mora is not None:
-        return canonical_mora
-
     raw_text = str(mora["text"])
     raw_phonemes = tuple(PHON_TABLE.get(raw_text, []))
     if raw_phonemes == expected_phonemes:
         return raw_text
+
+    canonical_mora = CANONICAL_MORA_BY_PHONEMES.get(expected_phonemes)
+
+    if canonical_mora is not None:
+        return canonical_mora
 
     raise ValueError(
         "Failed to resolve canonical mora text from phonemes. "
@@ -324,9 +324,6 @@ def build_annotation_from_accent_phrase(accent_phrase: dict[str, Any]) -> str:
     moras = accent_phrase["moras"]
     phrase_annotation_parts: list[str] = []
     accent_position = int(accent_phrase["accent"])
-
-    if len(moras) == 1:
-        return f"{get_canonical_mora_text(moras[0])}["
 
     for mora_index, mora in enumerate(moras):
         if mora_index >= 1 and mora_index == accent_position:

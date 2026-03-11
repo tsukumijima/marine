@@ -5,6 +5,7 @@ from marine.utils.jsut_annotation import get_annotation_structure_errors
 def test_get_annotation_structure_errors_accepts_valid_annotation() -> None:
     assert get_annotation_structure_errors("^ナ[ガシ#ハ]イ$") == []
     assert get_annotation_structure_errors("^フュ]ウジョンガ#カ[カ]ッタ$") == []
+    assert get_annotation_structure_errors("^シ$") == []
     assert (
         get_annotation_structure_errors(
             "^ア[ル]イテ#イ[ク]ノ?_ソ[レト]モ#バ]スデ#イ[ク]ノ?$"

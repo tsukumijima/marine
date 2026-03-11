@@ -109,7 +109,7 @@ def validate_accent_phrase_tokens(phrase_tokens: list[str]) -> list[str]:
             structural_errors.append("adjacent_accent_markers")
             break
 
-    if open_marker_count == 0 and close_marker_count == 0:
+    if open_marker_count == 0 and close_marker_count == 0 and len(mora_tokens) > 1:
         structural_errors.append("missing_accent_marker")
 
     if open_marker_count > 1:

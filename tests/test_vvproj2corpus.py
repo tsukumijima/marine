@@ -57,7 +57,7 @@ def test_build_annotation_from_accent_phrases_creates_jsut_style() -> None:
     assert extract_kana_from_annotation(annotation) == "ナガシハイ"
 
 
-def test_build_annotation_from_single_mora_phrase_adds_rise_marker() -> None:
+def test_build_annotation_from_single_mora_phrase_omits_optional_marker() -> None:
     accent_phrases = [
         {
             "moras": [
@@ -70,7 +70,7 @@ def test_build_annotation_from_single_mora_phrase_adds_rise_marker() -> None:
 
     annotation = build_annotation_from_accent_phrases(accent_phrases, "市")
 
-    assert annotation == "^シ[$"
+    assert annotation == "^シ$"
 
 
 def test_build_phone_level3_from_accent_phrases_includes_pause() -> None:
@@ -109,6 +109,14 @@ def test_get_canonical_mora_text_uses_phoneme_driven_mapping() -> None:
         get_canonical_mora_text({"text": "ス", "consonant": "s", "vowel": "U"}) == "ス"
     )
     assert get_canonical_mora_text({"text": "イ", "vowel": "N"}) == "ン"
+    assert (
+        get_canonical_mora_text({"text": "グァ", "consonant": "gw", "vowel": "a"})
+        == "グァ"
+    )
+    assert (
+        get_canonical_mora_text({"text": "シィ", "consonant": "s", "vowel": "i"})
+        == "シィ"
+    )
 
 
 def test_extract_kana_from_annotation_recovers_pause_punctuation() -> None:
