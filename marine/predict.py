@@ -110,7 +110,37 @@ class Predictor:
         states = torch.load(
             self.model_dir / "model.pth", map_location=self.device, weights_only=False
         )
-        self.model.load_state_dict(states["state_dict"])
+        state_dict = cast(dict[str, Tensor], states["state_dict"])
+        model_state_dict = self.model.state_dict()
+
+        if (
+            "embedding.embeddings.mora.weight" in state_dict
+            and "embedding.embeddings.mora.weight" in model_state_dict
+        ):
+            checkpoint_mora_weight = state_dict["embedding.embeddings.mora.weight"]
+            current_mora_weight = model_state_dict["embedding.embeddings.mora.weight"]
+
+            if (
+                checkpoint_mora_weight.ndim == 2
+                and current_mora_weight.ndim == 2
+                and checkpoint_mora_weight.shape[1] == current_mora_weight.shape[1]
+                and checkpoint_mora_weight.shape[0] < current_mora_weight.shape[0]
+            ):
+                expanded_mora_weight = current_mora_weight.clone()
+                expanded_mora_weight[: checkpoint_mora_weight.shape[0]] = (
+                    checkpoint_mora_weight
+                )
+                state_dict["embedding.embeddings.mora.weight"] = expanded_mora_weight
+                warnings.warn(
+                    (
+                        "The pretrained checkpoint uses an older mora inventory. "
+                        "Existing mora embeddings are restored from the checkpoint, "
+                        "and newly added mora embeddings keep their current initialization."
+                    ),
+                    stacklevel=2,
+                )
+
+        self.model.load_state_dict(state_dict)
         self.model.to(self.device)
         self.model.eval()
 
