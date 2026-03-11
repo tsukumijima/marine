@@ -2,12 +2,18 @@ from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
+from joblib import dump, load
 
 import marine.bin.pack_corpus as pack_corpus
 from marine.bin.pack_corpus import (
+    TARGET_ID_METADATA_FILE_NAME,
+    build_script_ids_signature,
     insert_punctuation_by_extracted_features,
     is_surface_aligned_mora_sequence,
+    load_target_id_metadata,
     process,
+    resolve_target_id_groups,
+    split_script_ids,
 )
 from marine.data.feature.feature_set import FeatureSet
 from marine.types import MarineFeature
@@ -531,3 +537,85 @@ def test_process_remaps_same_length_rescued_reading(
         labels["intonation_phrase_boundary"].tolist()
         == remapped_labels["intonation_phrase_boundary"]
     )
+
+
+def test_split_script_ids_uses_per_split_size() -> None:
+    script_ids = [f"A_{index:04d}" for index in range(1, 31)]
+
+    id_groups = split_script_ids(
+        script_ids=script_ids,
+        random_seed=12345,
+        test_size=4,
+    )
+
+    assert len(id_groups["val"]) == 4
+    assert len(id_groups["test"]) == 4
+
+
+def test_resolve_target_id_groups_migrates_legacy_ids(tmp_path: Path) -> None:
+    target_id_dir = tmp_path / "target_ids"
+    (target_id_dir / "val").mkdir(parents=True)
+    (target_id_dir / "test").mkdir(parents=True)
+
+    dump(["A_0002", "A_0005"], target_id_dir / "val" / "ids.pkl", compress=True)
+    dump(["A_0003", "A_0006"], target_id_dir / "test" / "ids.pkl", compress=True)
+
+    resolved_groups = resolve_target_id_groups(
+        script_ids=[f"A_{index:04d}" for index in range(1, 11)],
+        target_id_dir=target_id_dir,
+        random_seed=12345,
+        test_size=2,
+    )
+
+    assert resolved_groups == {
+        "val": {"A_0002", "A_0005"},
+        "test": {"A_0003", "A_0006"},
+    }
+    assert (target_id_dir / TARGET_ID_METADATA_FILE_NAME).exists() is True
+
+    metadata = load_target_id_metadata(target_id_dir)
+    assert metadata is not None
+    assert metadata["script_count"] == 10
+    assert metadata["test_size"] == 2
+
+
+def test_resolve_target_id_groups_regenerates_on_script_id_mismatch(
+    tmp_path: Path,
+) -> None:
+    target_id_dir = tmp_path / "target_ids"
+    script_ids = [f"A_{index:04d}" for index in range(1, 21)]
+
+    initial_groups = resolve_target_id_groups(
+        script_ids=script_ids,
+        target_id_dir=target_id_dir,
+        random_seed=12345,
+        test_size=3,
+    )
+    initial_metadata = load_target_id_metadata(target_id_dir)
+    assert initial_metadata is not None
+
+    changed_script_ids = [
+        script_id for script_id in script_ids if script_id != "A_0004"
+    ]
+    changed_script_ids.append("A_9999")
+    changed_script_ids = sorted(changed_script_ids)
+
+    regenerated_groups = resolve_target_id_groups(
+        script_ids=changed_script_ids,
+        target_id_dir=target_id_dir,
+        random_seed=12345,
+        test_size=3,
+    )
+    regenerated_metadata = load_target_id_metadata(target_id_dir)
+
+    assert regenerated_metadata is not None
+    assert regenerated_metadata["script_ids_hash"] == build_script_ids_signature(
+        changed_script_ids
+    )
+    assert (
+        regenerated_metadata["script_ids_hash"] != initial_metadata["script_ids_hash"]
+    )
+    assert len(regenerated_groups["val"]) == 3
+    assert len(regenerated_groups["test"]) == 3
+    assert regenerated_groups != initial_groups
+    assert load(target_id_dir / "val" / "ids.pkl") == sorted(regenerated_groups["val"])

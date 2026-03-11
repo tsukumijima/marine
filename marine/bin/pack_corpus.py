@@ -1,4 +1,6 @@
 import argparse
+import hashlib
+import json
 import logging
 import re
 import sys
@@ -21,6 +23,8 @@ from marine.utils.util import load_json_corpus, split_corpus
 
 
 logger: logging.Logger | None = None
+TARGET_ID_METADATA_FILE_NAME = "metadata.json"
+TARGET_ID_METADATA_VERSION = 1
 
 AP_BOUNDARY_LABEL = 1
 SAFE_MORA_SUBSTITUTIONS: set[tuple[str, str]] = {
@@ -107,6 +111,20 @@ PackedCorpusItem = tuple[str, BatchFeature, dict[str, LabelArray]]
 PackedCorpusProcessResult = tuple[PackedCorpusItem | None, str | None]
 
 
+def _get_active_logger() -> logging.Logger:
+    """
+    利用可能な logger を返す。
+
+    Returns:
+        logging.Logger: 利用する logger
+    """
+
+    if logger is not None:
+        return logger
+
+    return logging.getLogger(__name__)
+
+
 def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Convert Special format txt format data to json file",
@@ -148,7 +166,7 @@ def get_parser() -> argparse.ArgumentParser:
         "-t",
         type=int,
         default=-1,
-        help="""Specific size of samples for val and test
+        help="""Specific size of samples for each of val and test
         (-t < 0 = 5%% and / 5%% for val and test respectively)""",
     )
     parser.add_argument(
@@ -169,7 +187,7 @@ def get_parser() -> argparse.ArgumentParser:
         "--target_id_dir",
         type=Path,
         default=None,
-        help="Directory of id files to reproduce specific dataset",
+        help="Directory of managed eval ids to reuse or regenerate automatically",
     )
     parser.add_argument(
         "--random_seed",
@@ -1036,10 +1054,7 @@ def process(
                     dtype=np.uint8,
                 )
                 num_boundary = (
-                    np.count_nonzero(
-                        accent_phrase_boundaries == AP_BOUNDARY_LABEL
-                    )
-                    + 1
+                    np.count_nonzero(accent_phrase_boundaries == AP_BOUNDARY_LABEL) + 1
                 )
                 accents = _original_labels["accent_status"]
                 assert len(accents) == num_boundary, (
@@ -1091,16 +1106,277 @@ def _separate_process_results(
 def _load_target_ids(target_id_dir: Path) -> dict[str, set[str]]:
     id_groups: dict[str, set[str]] = {}
 
-    assert logger is not None
-    logger.info(f"Load ids from existing dataset ({target_id_dir})")
+    active_logger = _get_active_logger()
+    active_logger.info(f"Load ids from existing dataset ({target_id_dir})")
     for path in target_id_dir.glob("*/ids.pkl"):
         dataset_key = str(path.parent.name)
         id_groups[dataset_key] = set(load(path))
-        logger.info(
+        active_logger.info(
             f"Loaded {len(id_groups[dataset_key]):,} ids for {dataset_key} in {target_id_dir}"
         )
 
     return id_groups
+
+
+def build_script_ids_signature(script_ids: list[str]) -> str:
+    """
+    script id 一覧から比較用シグネチャを生成する。
+
+    Args:
+        script_ids (list[str]): 比較対象の script id 一覧
+
+    Returns:
+        str: script id 一覧の SHA-256 ハッシュ
+    """
+
+    signature_source = "\n".join(script_ids).encode("utf-8")
+    return hashlib.sha256(signature_source).hexdigest()
+
+
+def build_target_id_metadata(
+    script_ids: list[str],
+    random_seed: int,
+    test_size: int,
+) -> dict[str, int | str]:
+    """
+    固定 eval id の整合性確認に使うメタデータを生成する。
+
+    Args:
+        script_ids (list[str]): 現在の script id 一覧
+        random_seed (int): 分割時の乱数シード
+        test_size (int): val / test 各 split の件数
+
+    Returns:
+        dict[str, int | str]: 保存用メタデータ
+    """
+
+    return {
+        "version": TARGET_ID_METADATA_VERSION,
+        "script_count": len(script_ids),
+        "script_ids_hash": build_script_ids_signature(script_ids),
+        "random_seed": random_seed,
+        "test_size": test_size,
+    }
+
+
+def load_target_id_metadata(target_id_dir: Path) -> dict[str, Any] | None:
+    """
+    固定 eval id のメタデータを読み込む。
+
+    Args:
+        target_id_dir (Path): 固定 eval id ディレクトリ
+
+    Returns:
+        dict[str, Any] | None: 読み込んだメタデータ
+    """
+
+    metadata_path = target_id_dir / TARGET_ID_METADATA_FILE_NAME
+    if metadata_path.exists() is False:
+        return None
+
+    with open(metadata_path, encoding="utf-8") as file:
+        loaded_metadata = json.load(file)
+
+    return cast(dict[str, Any], loaded_metadata)
+
+
+def save_target_id_metadata(
+    target_id_dir: Path,
+    metadata: dict[str, int | str],
+) -> None:
+    """
+    固定 eval id のメタデータを保存する。
+
+    Args:
+        target_id_dir (Path): 固定 eval id ディレクトリ
+        metadata (dict[str, int | str]): 保存するメタデータ
+    """
+
+    metadata_path = target_id_dir / TARGET_ID_METADATA_FILE_NAME
+    target_id_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(metadata_path, "w", encoding="utf-8") as file:
+        json.dump(metadata, file, ensure_ascii=False, indent=2)
+        file.write("\n")
+
+
+def split_script_ids(
+    script_ids: list[str],
+    random_seed: int,
+    test_size: int,
+) -> dict[str, list[str]]:
+    """
+    script id 一覧から val / test の固定 split を生成する。
+
+    Args:
+        script_ids (list[str]): 分割対象の script id 一覧
+        random_seed (int): 分割時の乱数シード
+        test_size (int): val / test 各 split の件数
+
+    Returns:
+        dict[str, list[str]]: phase ごとの script id 一覧
+    """
+
+    if test_size > 0:
+        split_result = split_corpus(
+            script_ids,
+            random_state=random_seed,
+            absolute_test_size=test_size * 2,
+        )
+    else:
+        split_result = split_corpus(
+            script_ids,
+            random_state=random_seed,
+        )
+
+    return {
+        "val": sorted(split_result["val"]),
+        "test": sorted(split_result["test"]),
+    }
+
+
+def save_target_ids(
+    target_id_dir: Path,
+    id_groups: dict[str, list[str]],
+    metadata: dict[str, int | str],
+) -> None:
+    """
+    固定 eval id とメタデータを保存する。
+
+    Args:
+        target_id_dir (Path): 保存先ディレクトリ
+        id_groups (dict[str, list[str]]): phase ごとの script id 一覧
+        metadata (dict[str, int | str]): 保存するメタデータ
+    """
+
+    target_id_dir.mkdir(parents=True, exist_ok=True)
+
+    for phase, script_ids in id_groups.items():
+        phase_dir = target_id_dir / phase
+        phase_dir.mkdir(parents=True, exist_ok=True)
+        dump(script_ids, phase_dir / "ids.pkl", compress=True)
+
+    save_target_id_metadata(target_id_dir, metadata)
+
+
+def _validate_target_id_groups(
+    script_ids: list[str],
+    id_groups: dict[str, set[str]],
+    test_size: int,
+) -> tuple[bool, str]:
+    """
+    固定 eval id ディレクトリが現在の corpus に対して有効かを検証する。
+
+    Args:
+        script_ids (list[str]): 現在の script id 一覧
+        id_groups (dict[str, set[str]]): 読み込んだ固定 eval id
+        test_size (int): val / test 各 split の件数
+
+    Returns:
+        tuple[bool, str]: 検証結果と理由
+    """
+
+    available_script_ids = set(script_ids)
+
+    if {"val", "test"}.issubset(id_groups.keys()) is False:
+        return False, "val/test ids were not found"
+
+    if len(id_groups["val"] & id_groups["test"]) > 0:
+        return False, "val/test ids overlap"
+
+    for phase in ["val", "test"]:
+        if id_groups[phase].issubset(available_script_ids) is False:
+            return False, f"{phase} ids are not a subset of current corpus ids"
+
+    if test_size > 0:
+        if len(id_groups["val"]) != test_size or len(id_groups["test"]) != test_size:
+            return False, "val/test sizes do not match the requested split size"
+
+    return True, "valid"
+
+
+def resolve_target_id_groups(
+    script_ids: list[str],
+    target_id_dir: Path,
+    random_seed: int,
+    test_size: int,
+) -> dict[str, set[str]]:
+    """
+    固定 eval id を読み込み、必要に応じて自動再生成する。
+
+    Args:
+        script_ids (list[str]): 現在の script id 一覧
+        target_id_dir (Path): 固定 eval id ディレクトリ
+        random_seed (int): 分割時の乱数シード
+        test_size (int): val / test 各 split の件数
+
+    Returns:
+        dict[str, set[str]]: 使用する固定 eval id
+    """
+
+    expected_metadata = build_target_id_metadata(
+        script_ids=script_ids,
+        random_seed=random_seed,
+        test_size=test_size,
+    )
+    existing_id_groups = (
+        _load_target_ids(target_id_dir) if target_id_dir.exists() else {}
+    )
+    existing_metadata = load_target_id_metadata(target_id_dir)
+
+    managed_existing_id_groups = {
+        phase: existing_id_groups[phase]
+        for phase in ["val", "test"]
+        if phase in existing_id_groups
+    }
+    active_logger = _get_active_logger()
+
+    if len(existing_id_groups) > 0:
+        is_valid_groups, reason = _validate_target_id_groups(
+            script_ids=script_ids,
+            id_groups=managed_existing_id_groups,
+            test_size=test_size,
+        )
+        if is_valid_groups is True:
+            if existing_metadata == expected_metadata:
+                active_logger.info(
+                    f"Reuse managed fixed eval ids. target_id_dir: {target_id_dir}"
+                )
+                return managed_existing_id_groups
+
+            if existing_metadata is None:
+                active_logger.info(
+                    f"Managed metadata was not found. Migrate current fixed eval ids. target_id_dir: {target_id_dir}"
+                )
+                save_target_ids(
+                    target_id_dir=target_id_dir,
+                    id_groups={
+                        "val": sorted(managed_existing_id_groups["val"]),
+                        "test": sorted(managed_existing_id_groups["test"]),
+                    },
+                    metadata=expected_metadata,
+                )
+                return managed_existing_id_groups
+
+        active_logger.warning(
+            f"Regenerate fixed eval ids due to mismatch. target_id_dir: {target_id_dir}, reason: {reason}"
+        )
+    else:
+        active_logger.info(
+            f"Generate fixed eval ids because target id directory is empty. target_id_dir: {target_id_dir}"
+        )
+
+    generated_id_groups = split_script_ids(
+        script_ids=script_ids,
+        random_seed=random_seed,
+        test_size=test_size,
+    )
+    save_target_ids(
+        target_id_dir=target_id_dir,
+        id_groups=generated_id_groups,
+        metadata=expected_metadata,
+    )
+    return {phase: set(phase_ids) for phase, phase_ids in generated_id_groups.items()}
 
 
 def _sort_corpus_by_script_id(corpus: list[PackedCorpusItem]) -> list[PackedCorpusItem]:
@@ -1219,16 +1495,30 @@ def entry(argv: list[str] = sys.argv) -> None:
     # Cleaing
     corpus = _sort_corpus_by_script_id(_remove_unavailable_script(corpus))
     logger.info(f"Cleaned corpus: {len(corpus):,}")
+    script_ids = [item[0] for item in corpus]
 
     if args.target_id_dir is None:
         if args.skip_corpus_split:
             corpus = {key: corpus for key in [args.single_corpus_key]}
         else:
-            corpus = split_corpus(
-                corpus, random_state=args.random_seed, absolute_test_size=args.test_size
-            )
+            if args.test_size > 0:
+                corpus = split_corpus(
+                    corpus,
+                    random_state=args.random_seed,
+                    absolute_test_size=args.test_size * 2,
+                )
+            else:
+                corpus = split_corpus(
+                    corpus,
+                    random_state=args.random_seed,
+                )
     else:
-        id_groups = _load_target_ids(args.target_id_dir)
+        id_groups = resolve_target_id_groups(
+            script_ids=script_ids,
+            target_id_dir=args.target_id_dir,
+            random_seed=args.random_seed,
+            test_size=args.test_size,
+        )
         corpus = _split_corpus_by_ids(corpus, id_groups)
 
     # Output results
