@@ -57,6 +57,22 @@ def test_build_annotation_from_accent_phrases_creates_jsut_style() -> None:
     assert extract_kana_from_annotation(annotation) == "ナガシハイ"
 
 
+def test_build_annotation_from_single_mora_phrase_adds_rise_marker() -> None:
+    accent_phrases = [
+        {
+            "moras": [
+                {"text": "シ", "consonant": "sh", "vowel": "i"},
+            ],
+            "accent": 1,
+            "pauseMora": None,
+        },
+    ]
+
+    annotation = build_annotation_from_accent_phrases(accent_phrases, "市")
+
+    assert annotation == "^シ[$"
+
+
 def test_build_phone_level3_from_accent_phrases_includes_pause() -> None:
     accent_phrases = [
         {
@@ -96,7 +112,7 @@ def test_get_canonical_mora_text_uses_phoneme_driven_mapping() -> None:
 
 
 def test_extract_kana_from_annotation_recovers_pause_punctuation() -> None:
-    assert extract_kana_from_annotation("^フュ[ジョン_ヴィラ$") == "フュジョン、ヴィラ"
+    assert extract_kana_from_annotation("^フュ[ジョン_ヴィラ$") == "フュジョン,ヴィラ"
 
 
 def test_build_annotation_prefers_phoneme_consistent_mora_over_surface_spelling() -> (
@@ -142,12 +158,10 @@ def test_build_annotation_keeps_split_surface_like_foreign_mora_when_phones_are_
 
 
 def test_sanitize_surface_text_removes_leading_label() -> None:
-    assert (
-        sanitize_surface_text("ROHAN4600_0001:流し斬りが入る。") == "流し斬りが入る。"
-    )
-    assert sanitize_surface_text("普通の本文です。") == "普通の本文です。"
-    assert sanitize_surface_text("Q: どうする？") == "Q: どうする？"
-    assert sanitize_surface_text("2025: 開幕です") == "2025: 開幕です"
+    assert sanitize_surface_text("ROHAN4600_0001:流し斬りが入る。") == "流し斬りが入る."
+    assert sanitize_surface_text("普通の本文です。") == "普通の本文です."
+    assert sanitize_surface_text("Q: どうする？") == "Q, どうする?"
+    assert sanitize_surface_text("2025: 開幕です") == "2025, 開幕です"
 
 
 def test_generated_annotation_can_be_built_from_realistic_vvproj_shape(
@@ -254,5 +268,5 @@ def test_build_corpus_entries_reads_aisp_projects(tmp_path: Path) -> None:
         strip_text_prefix_pattern=None,
     )
 
-    assert text_entries["TEST_0001"]["text_level0"] == "流し斬りが入る。"
+    assert text_entries["TEST_0001"]["text_level0"] == "流し斬りが入る."
     assert annotations["TEST_0001"] == "^ナ[ガ$"

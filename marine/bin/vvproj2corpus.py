@@ -12,6 +12,8 @@ from marine.bin.make_raw_corpus import parse_jsut_annotation
 from marine.logger import getLogger
 from marine.types import AccentRepresentMode
 from marine.utils.g2p_util.util import CANONICAL_MORA_BY_PHONEMES, PHON_TABLE
+from marine.utils.jsut_annotation import get_annotation_structure_errors
+from marine.utils.util import normalize_punctuation_characters
 
 
 logger: logging.Logger | None = None
@@ -158,7 +160,7 @@ def sanitize_surface_text(
 
     matched_rohan_prefix = ROHAN_TEXT_PREFIX_PATTERN.match(stripped_text)
     if matched_rohan_prefix is not None:
-        return matched_rohan_prefix.group(2).strip()
+        return normalize_punctuation_characters(matched_rohan_prefix.group(2).strip())
 
     if strip_text_prefix_pattern is not None:
         matched_prefix = strip_text_prefix_pattern.match(stripped_text)
@@ -169,9 +171,9 @@ def sanitize_surface_text(
                     "strip_text_prefix_pattern must contain a capture group for the remaining text."
                 )
 
-            return matched_prefix.group(1).strip()
+            return normalize_punctuation_characters(matched_prefix.group(1).strip())
 
-    return stripped_text
+    return normalize_punctuation_characters(stripped_text)
 
 
 def extract_project_audio_data(
@@ -305,7 +307,7 @@ def extract_kana_from_annotation(annotation: str) -> str:
     for marker in ["[", "]", "#", "?"]:
         stripped_annotation = stripped_annotation.replace(marker, "")
 
-    return stripped_annotation.replace("_", "、")
+    return stripped_annotation.replace("_", ",")
 
 
 def build_annotation_from_accent_phrase(accent_phrase: dict[str, Any]) -> str:
@@ -322,6 +324,9 @@ def build_annotation_from_accent_phrase(accent_phrase: dict[str, Any]) -> str:
     moras = accent_phrase["moras"]
     phrase_annotation_parts: list[str] = []
     accent_position = int(accent_phrase["accent"])
+
+    if len(moras) == 1:
+        return f"{get_canonical_mora_text(moras[0])}["
 
     for mora_index, mora in enumerate(moras):
         if mora_index >= 1 and mora_index == accent_position:
@@ -429,6 +434,13 @@ def validate_annotation(
         raise ValueError(
             f"Failed to validate generated annotation. script_id: {script_id}"
         ) from ex
+
+    structural_errors = get_annotation_structure_errors(annotation)
+    if len(structural_errors) > 0:
+        raise ValueError(
+            "Generated annotation has structural prosody errors. "
+            f"script_id: {script_id}, errors: {structural_errors}"
+        )
 
 
 def build_script_id(

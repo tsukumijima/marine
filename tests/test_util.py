@@ -33,6 +33,7 @@ from marine.utils.util import (
     expand_word_label_to_mora,
     get_accent_nucleus_in_binary_accent_stauts_seq,
     get_accent_nucleus_in_high_low_accent_stauts_seq,
+    normalize_punctuation_characters,
 )
 
 
@@ -148,6 +149,13 @@ def test_label_expanding():
             labels, moras, word_boundaries, "intonation_phrase_boundary"
         )
         assert expected == mora_labels
+
+
+def test_normalize_punctuation_characters() -> None:
+    assert normalize_punctuation_characters("はい：そうです；本当です。") == (
+        "はい,そうです,本当です."
+    )
+    assert normalize_punctuation_characters("えっ，そうなの？！") == "えっ,そうなの?!"
 
 
 def test_accent_conversion():

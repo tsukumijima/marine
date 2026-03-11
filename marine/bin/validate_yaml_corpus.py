@@ -9,9 +9,10 @@ import yaml
 
 from marine.bin.make_raw_corpus import parse_jsut_annotation
 from marine.types import AccentRepresentMode
+from marine.utils.jsut_annotation import get_annotation_structure_errors
 
 
-SUSPICIOUS_TERMINAL_MARKER_PATTERN = re.compile(r"[\[#_]\\?\$$")
+SUSPICIOUS_TERMINAL_MARKER_PATTERN = re.compile(r"[#_]\\?\$$")
 
 
 def get_parser() -> argparse.ArgumentParser:
@@ -100,6 +101,29 @@ def validate_parseable_annotations(
             invalid_script_ids.append(script_id)
 
     return invalid_script_ids
+
+
+def validate_structural_annotations(
+    annotations: dict[str, str],
+) -> list[tuple[str, list[str]]]:
+    """
+    annotation の prosody 構文を検証し、異常な script id と理由を返す。
+
+    Args:
+        annotations (dict[str, str]): script id ごとの annotation
+
+    Returns:
+        list[tuple[str, list[str]]]: script id と構文エラー一覧
+    """
+
+    invalid_annotations: list[tuple[str, list[str]]] = []
+
+    for script_id, annotation in annotations.items():
+        structural_errors = get_annotation_structure_errors(annotation)
+        if len(structural_errors) > 0:
+            invalid_annotations.append((script_id, structural_errors))
+
+    return invalid_annotations
 
 
 def detect_suspicious_terminal_markers(
@@ -218,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         args.accent_status_seq_level,
         cast(AccentRepresentMode, args.accent_status_represent_mode),
     )
+    structurally_invalid_annotations = validate_structural_annotations(annotations)
     suspicious_terminal_script_ids = detect_suspicious_terminal_markers(annotations)
     duplicate_annotation_pairs = detect_exact_duplicate_annotations(texts, annotations)
     inconsistent_duplicate_surfaces = detect_inconsistent_duplicate_surfaces(
@@ -229,6 +254,13 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "ERROR Invalid annotations were found. "
             f"count: {len(invalid_script_ids)}, examples: {invalid_script_ids[:5]}"
+        )
+
+    if len(structurally_invalid_annotations) > 0:
+        print(
+            "ERROR Structurally invalid annotations were found. "
+            f"count: {len(structurally_invalid_annotations)}, "
+            f"examples: {structurally_invalid_annotations[:5]}"
         )
 
     if len(duplicate_annotation_pairs) > 0:
@@ -254,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if (
         len(invalid_script_ids) == 0
+        and len(structurally_invalid_annotations) == 0
         and len(suspicious_terminal_script_ids) == 0
         and len(duplicate_annotation_pairs) == 0
         and len(inconsistent_duplicate_surfaces) == 0
