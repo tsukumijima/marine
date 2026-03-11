@@ -73,34 +73,45 @@ checkpoint_dir=$model_dir/$tag
 
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
     echo "stage 1: Convert raw corpus to json"
-    uv run task make-raw-corpus -- $jsut_script_path $raw_corpus_dir --accent_status_seq_level $accent_status_seq_level --accent_status_represent_mode $accent_status_represent_mode
+    uv run task make-raw-corpus -- "$jsut_script_path" "$raw_corpus_dir" --accent_status_seq_level "$accent_status_seq_level" --accent_status_represent_mode "$accent_status_represent_mode"
 fi
 
 if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ] && [ -z ${exist_feature_dir} ]; then
     echo "stage 2: Extract feature"
-    uv run task prepare-features-pyopenjtalk -- $raw_corpus_dir $feature_file_dir
+    uv run task prepare-features-pyopenjtalk -- "$raw_corpus_dir" "$feature_file_dir"
 fi
 
 if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ] && [ -z ${exist_vocab_dir} ]; then
     echo "stage 3: Build vocabulary"
-    uv run task build-vocab -- $feature_file_dir $vocab_dir -m $vocab_min_freq
+    uv run task build-vocab -- "$feature_file_dir" "$vocab_dir" -m "$vocab_min_freq"
 fi
 
 if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
     echo "stage 4: Feature generation"
     if [ -z "${exist_target_id_dir}" ]; then
-        uv run task pack-corpus -- $raw_corpus_dir $feature_file_dir $vocab_path $feature_pack_dir -s $accent_status_seq_level -f $feature_table_key -t $val_test_size
+        uv run task pack-corpus -- "$raw_corpus_dir" "$feature_file_dir" "$vocab_path" "$feature_pack_dir" -s "$accent_status_seq_level" -f "$feature_table_key" -t "$val_test_size"
     else
-        uv run task pack-corpus -- $raw_corpus_dir $feature_file_dir $vocab_path $feature_pack_dir -s $accent_status_seq_level -f $feature_table_key --target_id_dir $exist_target_id_dir -t $val_test_size
+        uv run task pack-corpus -- "$raw_corpus_dir" "$feature_file_dir" "$vocab_path" "$feature_pack_dir" -s "$accent_status_seq_level" -f "$feature_table_key" --target_id_dir "$exist_target_id_dir" -t "$val_test_size"
     fi
 fi
 
 if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
     echo "stage 5: Train model and test"
-    cmd_args="--config-dir $script_dir/conf/train \
-        train=$train data=$data model=$model criterions=$criterions optim=$optim \
-        train.out_dir=$model_dir train.model_name=$tag train.save_vocab_path=false \
-        train.tensorboard_event_path=$tensorboard_dir train.test_log_dir=$in_domain_test_log_dir \
-        data.feature_table_key=$feature_table_key data.data_dir=$feature_pack_dir model.vocab_path=$vocab_path"
-    uv run task train-model -- $cmd_args
+    cmd_args=(
+        "--config-dir" "$script_dir/conf/train"
+        "train=$train"
+        "data=$data"
+        "model=$model"
+        "criterions=$criterions"
+        "optim=$optim"
+        "train.out_dir=$model_dir"
+        "train.model_name=$tag"
+        "train.save_vocab_path=false"
+        "train.tensorboard_event_path=$tensorboard_dir"
+        "train.test_log_dir=$in_domain_test_log_dir"
+        "data.feature_table_key=$feature_table_key"
+        "data.data_dir=$feature_pack_dir"
+        "model.vocab_path=$vocab_path"
+    )
+    uv run task train-model -- "${cmd_args[@]}"
 fi
