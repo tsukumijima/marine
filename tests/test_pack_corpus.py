@@ -256,6 +256,104 @@ def test_surface_aligned_mora_sequence_accepts_voicing_difference() -> None:
     )
 
 
+def test_surface_aligned_mora_sequence_accepts_split_kana_nodes_for_rare_mora() -> None:
+    """rare モーラがカナ node に分割されても、surface から救済できることを確認する。"""
+
+    nodes = cast(
+        list[MarineFeature],
+        [
+            {
+                "surface": "ゲシ",
+                "pron": "ゲシ",
+                "pos": "名詞:一般:*:*",
+                "c_type": "*",
+                "c_form": "*",
+                "accent_type": 0,
+                "accent_con_type": "*",
+                "chain_flag": 0,
+            },
+            {
+                "surface": "ィ",
+                "pron": "ィ",
+                "pos": "フィラー:*:*:*",
+                "c_type": "*",
+                "c_form": "*",
+                "accent_type": 0,
+                "accent_con_type": "*",
+                "chain_flag": 1,
+            },
+            {
+                "surface": "グ",
+                "pron": "グ",
+                "pos": "名詞:一般:*:*",
+                "c_type": "*",
+                "c_form": "*",
+                "accent_type": 0,
+                "accent_con_type": "*",
+                "chain_flag": 1,
+            },
+            {
+                "surface": "ゥ",
+                "pron": "ゥ",
+                "pos": "フィラー:*:*:*",
+                "c_type": "*",
+                "c_form": "*",
+                "accent_type": 0,
+                "accent_con_type": "*",
+                "chain_flag": 1,
+            },
+        ],
+    )
+
+    assert (
+        is_surface_aligned_mora_sequence(
+            nodes,
+            cast(list[str], pron2mora("ゲシィグゥ")),
+        )
+        is True
+    )
+
+
+def test_surface_aligned_mora_sequence_accepts_kana_surface_as_pronunciation_hint() -> (
+    None
+):
+    """カナ surface 自体が phonetic な場合は、その綴りを pronunciation 候補として使えることを確認する。"""
+
+    nodes = cast(
+        list[MarineFeature],
+        [
+            {
+                "surface": "グゥ",
+                "pron": "グー",
+                "pos": "名詞:一般:*:*",
+                "c_type": "*",
+                "c_form": "*",
+                "accent_type": 0,
+                "accent_con_type": "*",
+                "chain_flag": 0,
+            },
+            {
+                "surface": "シィ",
+                "pron": "シー",
+                "pos": "名詞:一般:*:*",
+                "c_type": "*",
+                "c_form": "*",
+                "accent_type": 0,
+                "accent_con_type": "*",
+                "chain_flag": 0,
+            },
+        ],
+    )
+
+    assert (
+        is_surface_aligned_mora_sequence(
+            nodes,
+            cast(list[str], pron2mora("グゥシィ")),
+        )
+        is True
+    )
+
+
 def test_insert_punctuation_by_extracted_features_allows_soft_pron_difference() -> None:
     """発音本体に安全な揺れがあっても punctuation 挿入だけは継続できることを確認する。"""
 
@@ -311,7 +409,7 @@ def test_process_drops_ap_label_length_mismatch_when_ap_count_cannot_match() -> 
         list[MarineFeature],
         [
             {
-                "surface": "入れ",
+                "surface": "abc",
                 "pron": "イレ",
                 "pos": "動詞:自立:*:*",
                 "c_type": "*",
@@ -328,7 +426,7 @@ def test_process_drops_ap_label_length_mismatch_when_ap_count_cannot_match() -> 
         feature_set,
         "ap",
         script_id="test-script",
-        surface="入れ",
+        surface="abc",
         pron="ハイレ",
         accent_status="1,2",
         accent_phrase_boundary="0,0,0",
@@ -341,6 +439,53 @@ def test_process_drops_ap_label_length_mismatch_when_ap_count_cannot_match() -> 
 
 def test_process_remaps_ap_boundary_labels_without_touching_ap_accent() -> None:
     """AP ラベルでは accent_status を保ったまま境界ラベルだけを再配置できることを確認する。"""
+
+    vocab_path = (
+        Path(__file__).resolve().parent.parent
+        / "recipe"
+        / "common"
+        / "database"
+        / "20220912_jsut_vocab_min_2"
+        / "vocab.pkl"
+    )
+    feature_set = FeatureSet(vocab_path, feature_table_key="open-jtalk")
+    nodes = cast(
+        list[MarineFeature],
+        [
+            {
+                "surface": "abc",
+                "pron": "イレ",
+                "pos": "動詞:自立:*:*",
+                "c_type": "*",
+                "c_form": "*",
+                "accent_type": 0,
+                "accent_con_type": "*",
+                "chain_flag": 0,
+            },
+        ],
+    )
+
+    packed_item, wrong_mora_info = process(
+        nodes,
+        feature_set,
+        "ap",
+        script_id="test-script",
+        surface="abc",
+        pron="ハイレ",
+        accent_status="1",
+        accent_phrase_boundary="0,0,0",
+        intonation_phrase_boundary="0,0,0",
+    )
+
+    assert packed_item is not None
+    assert wrong_mora_info is None
+    _, _, labels = packed_item
+    assert labels["accent_status"].tolist() == [1]
+    assert labels["accent_phrase_boundary"].tolist() == [0, 0]
+
+
+def test_process_prefers_surface_aligned_node_pronunciation_for_ap_labels() -> None:
+    """surface 候補で説明できる読みは AP ラベルを保ったまま expected pron へ寄せることを確認する。"""
 
     vocab_path = (
         Path(__file__).resolve().parent.parent
@@ -381,9 +526,16 @@ def test_process_remaps_ap_boundary_labels_without_touching_ap_accent() -> None:
 
     assert packed_item is not None
     assert wrong_mora_info is None
-    _, _, labels = packed_item
+    _, feature, labels = packed_item
+    assert (
+        feature["mora"].tolist()
+        == feature_set.convert_feature_to_id(
+            "mora",
+            ["ハ", "イ", "レ"],
+        ).tolist()
+    )
     assert labels["accent_status"].tolist() == [1]
-    assert labels["accent_phrase_boundary"].tolist() == [0, 0]
+    assert labels["accent_phrase_boundary"].tolist() == [0, 0, 0]
 
 
 def test_process_accepts_ap_label_when_ap_boundary_count_matches() -> None:

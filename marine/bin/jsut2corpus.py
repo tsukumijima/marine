@@ -14,6 +14,7 @@ from tqdm import tqdm
 from marine.logger import getLogger
 from marine.types import AccentRepresentMode
 from marine.utils.g2p_util import pron2mora
+from marine.utils.jsut_source import select_jsut_surface_text
 
 
 logger: logging.Logger | None = None
@@ -279,7 +280,7 @@ def load_jsut_corpus(
     for script_id in tqdm(texts.keys(), "Parse anntoations"):
         features = {}
 
-        surface = texts[script_id]["text_level0"]
+        surface = select_jsut_surface_text(texts[script_id])
         annotation = annotations[script_id]
         feature = parse_jsut_annotation(
             annotation, accent_status_seq_level, accent_status_represent_mode

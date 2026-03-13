@@ -13,6 +13,7 @@ from marine.logger import getLogger
 from marine.types import AccentRepresentMode
 from marine.utils.g2p_util.util import CANONICAL_MORA_BY_PHONEMES, PHON_TABLE
 from marine.utils.jsut_annotation import get_annotation_structure_errors
+from marine.utils.jsut_source import reorder_text_entry_fields
 from marine.utils.util import normalize_punctuation_characters
 
 
@@ -502,6 +503,9 @@ def build_corpus_entries(
 
             surface = sanitize_surface_text(raw_text, strip_text_prefix_pattern)
             accent_phrases = audio_item["query"]["accentPhrases"]
+            if len(accent_phrases) == 0:
+                continue
+
             script_id = build_script_id(
                 script_id_prefix=script_id_prefix,
                 index=current_index,
@@ -518,15 +522,17 @@ def build_corpus_entries(
             phone_level3 = build_phone_level3_from_accent_phrases(accent_phrases)
 
             annotations[script_id] = annotation
-            text_entries[script_id] = {
-                "text_level0": surface,
-                "kana_level0": kana_text,
-                "text_level1": surface,
-                "text_level2": surface,
-                "kana_level2": kana_text,
-                "kana_level3": kana_text,
-                "phone_level3": phone_level3,
-            }
+            text_entries[script_id] = reorder_text_entry_fields(
+                {
+                    "text_level0": surface,
+                    "kana_level0": kana_text,
+                    "text_level1": surface,
+                    "text_level2": surface,
+                    "kana_level2": kana_text,
+                    "kana_level3": kana_text,
+                    "phone_level3": phone_level3,
+                }
+            )
             current_index += 1
 
     return text_entries, annotations
@@ -546,7 +552,7 @@ def write_yaml(path: Path, content: dict[str, Any]) -> None:
             content,
             file,
             allow_unicode=True,
-            sort_keys=True,
+            sort_keys=False,
             default_flow_style=False,
         )
 

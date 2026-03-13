@@ -278,3 +278,67 @@ def test_build_corpus_entries_reads_aisp_projects(tmp_path: Path) -> None:
 
     assert text_entries["TEST_0001"]["text_level0"] == "流し斬りが入る."
     assert annotations["TEST_0001"] == "^ナ[ガ$"
+
+
+def test_build_corpus_entries_skips_items_without_accent_phrases(
+    tmp_path: Path,
+) -> None:
+    vvproj_path = tmp_path / "project1-50.vvproj"
+    vvproj_path.write_text(
+        json.dumps(
+            {
+                "audioKeys": ["item1", "item2", "item3"],
+                "audioItems": {
+                    "item1": {
+                        "text": "",
+                        "query": {
+                            "accentPhrases": [
+                                {
+                                    "moras": [
+                                        {"text": "ア", "vowel": "a"},
+                                    ],
+                                    "accent": 1,
+                                    "pauseMora": None,
+                                },
+                            ],
+                        },
+                    },
+                    "item2": {
+                        "text": "ROHAN4600_0001:空の accent phrase",
+                        "query": {
+                            "accentPhrases": [],
+                        },
+                    },
+                    "item3": {
+                        "text": "ROHAN4600_0002:流し斬りが入る。",
+                        "query": {
+                            "accentPhrases": [
+                                {
+                                    "moras": [
+                                        {"text": "ナ", "consonant": "n", "vowel": "a"},
+                                        {"text": "ガ", "consonant": "g", "vowel": "a"},
+                                    ],
+                                    "accent": 2,
+                                    "pauseMora": None,
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    text_entries, annotations = build_corpus_entries(
+        source_dir=tmp_path,
+        script_id_prefix="TEST",
+        script_id_padding=4,
+        accent_status_seq_level="mora",
+        accent_status_represent_mode="binary",
+        strip_text_prefix_pattern=None,
+    )
+
+    assert list(text_entries.keys()) == ["TEST_0001"]
+    assert list(annotations.keys()) == ["TEST_0001"]

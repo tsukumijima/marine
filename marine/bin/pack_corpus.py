@@ -48,6 +48,13 @@ SAFE_MORA_SUBSTITUTIONS: set[tuple[str, str]] = {
     ("ハ", "ワ"),
 }
 KANJI_SURFACE_PATTERN = re.compile(r"^[一-龯々]+$")
+PURE_KANA_SURFACE_PATTERN = re.compile(r"^[ぁ-んァ-ヴー゛゜ゝゞヽヾヷ-ヺ]+$")
+# OpenJTalk は rare モーラを含むカナ語を細かく分割することがある。
+## その場合でも、surface 候補から expected pronunciation を安全に説明できるなら
+## node を結合して救済したいので、結合候補には漢字だけでなくカナ連接も含める。
+MERGEABLE_SURFACE_PATTERN = re.compile(
+    r"^[一-龯々ぁ-んァ-ヴー゛゜ゝゞヽヾヷ-ヺ0-9０-９]+$",
+)
 
 VOICE_NORMALIZATION_TABLE = str.maketrans(
     {
@@ -79,7 +86,7 @@ VOICE_NORMALIZATION_TABLE = str.maketrans(
         "ヴ": "ウ",
     }
 )
-MAX_ALIGNMENT_NODE_SPAN = 2
+MAX_ALIGNMENT_NODE_SPAN = 4
 
 SURFACE_PRONUNCIATION_VARIANTS: dict[str, set[str]] = {
     # 「いう / ゆう」は話し言葉の揺れとして非常に頻出する。
@@ -381,6 +388,18 @@ def _normalize_pronunciation_for_alignment(text: str) -> str:
         r"\1ー",
         normalized_text,
     )
+    normalized_text = (
+        normalized_text.replace("ティ", "チ")
+        .replace("ディ", "ジ")
+        .replace("トゥ", "ツ")
+        .replace("ドゥ", "ズ")
+        .replace("ヴァ", "バ")
+        .replace("ヴィ", "ビ")
+        .replace("ヴゥ", "ブ")
+        .replace("ヴェ", "ベ")
+        .replace("ヴォ", "ボ")
+        .replace("ヴ", "ブ")
+    )
     normalized_text = _normalize_vowel_sequences_for_alignment(normalized_text)
     normalized_text = (
         normalized_text.replace("ヲ", "オ").replace("ヅ", "ズ").replace("ヂ", "ジ")
@@ -471,11 +490,11 @@ def _can_merge_alignment_nodes(surface_parts: list[str]) -> bool:
         surface_parts (list[str]): 結合候補の surface 一覧
 
     Returns:
-        bool: 漢字複合語として結合探索する価値がある場合は True
+        bool: surface 候補として安全に結合探索する価値がある場合は True
     """
 
     return all(
-        KANJI_SURFACE_PATTERN.fullmatch(surface_part) is not None
+        MERGEABLE_SURFACE_PATTERN.fullmatch(surface_part) is not None
         for surface_part in surface_parts
     )
 
@@ -495,6 +514,8 @@ def _get_surface_candidate_moras(
     """
 
     candidate_pronunciations: list[str] = [extracted_pronunciation]
+    if PURE_KANA_SURFACE_PATTERN.fullmatch(surface) is not None:
+        candidate_pronunciations.append(surface)
     allowed_variants = SURFACE_PRONUNCIATION_VARIANTS.get(surface)
     if allowed_variants is not None:
         candidate_pronunciations.extend(sorted(allowed_variants))
@@ -916,6 +937,142 @@ def is_surface_aligned_mora_sequence(
     return _search(0, 0)
 
 
+def build_surface_aligned_nodes(
+    nodes: list[MarineFeature],
+    expected_moras: list[str],
+) -> list[MarineFeature] | None:
+    """
+    surface 候補で expected pron を説明できる場合、pron を expected 側へ寄せた node 列を返す。
+
+    `pyopenjtalk` の代表読みと dataset 側 pronunciation が異なっていても、
+    surface から安全に導ける読みであれば、形態素境界と品詞情報はそのままに
+    pronunciation だけ expected 側へ合わせた node 列へ変換する。
+
+    Args:
+        nodes (list[MarineFeature]): OpenJTalk 由来の形態素列
+        expected_moras (list[str]): アノテーション由来の期待モーラ列
+
+    Returns:
+        list[MarineFeature] | None: pronunciation を expected 側へ寄せた node 列。安全に対応付けられない場合は None。
+    """
+
+    pronounced_nodes: list[tuple[int, MarineFeature]] = [
+        (node_index, node)
+        for node_index, node in enumerate(nodes)
+        if node["pron"] is not None
+    ]
+
+    @cache
+    def _search(
+        pronounced_node_index: int,
+        expected_offset: int,
+    ) -> tuple[tuple[int, int, str], ...] | None:
+        if pronounced_node_index == len(pronounced_nodes):
+            if expected_offset == len(expected_moras):
+                return ()
+            return None
+
+        max_span_end = min(
+            len(pronounced_nodes),
+            pronounced_node_index + MAX_ALIGNMENT_NODE_SPAN,
+        )
+        for next_pronounced_node_index in range(
+            pronounced_node_index + 1,
+            max_span_end + 1,
+        ):
+            span_nodes = pronounced_nodes[
+                pronounced_node_index:next_pronounced_node_index
+            ]
+            span_surfaces = [str(node["surface"]) for _, node in span_nodes]
+            span_pronunciation = "".join(str(node["pron"]) for _, node in span_nodes)
+            span_original_indexes = [original_index for original_index, _ in span_nodes]
+            if len(span_nodes) > 1 and (
+                _can_merge_alignment_nodes(span_surfaces) is False
+                or span_original_indexes
+                != list(
+                    range(
+                        span_original_indexes[0],
+                        span_original_indexes[0] + len(span_original_indexes),
+                    )
+                )
+            ):
+                continue
+
+            surface = "".join(span_surfaces)
+            for next_expected_offset in range(
+                expected_offset + 1,
+                len(expected_moras) + 1,
+            ):
+                expected_node_moras = expected_moras[
+                    expected_offset:next_expected_offset
+                ]
+                if (
+                    _is_supported_by_surface_candidates(
+                        surface,
+                        span_pronunciation,
+                        expected_node_moras,
+                    )
+                    is False
+                ):
+                    continue
+
+                remainder = _search(
+                    next_pronounced_node_index,
+                    next_expected_offset,
+                )
+                if remainder is None:
+                    continue
+
+                return (
+                    (
+                        span_original_indexes[0],
+                        span_original_indexes[-1],
+                        "".join(expected_node_moras),
+                    ),
+                    *remainder,
+                )
+
+        return None
+
+    aligned_pronunciations = _search(0, 0)
+    _search.cache_clear()
+    if aligned_pronunciations is None:
+        return None
+
+    aligned_nodes: list[MarineFeature] = []
+    is_modified = False
+    aligned_pronunciation_table = {
+        start_index: (end_index, aligned_pronunciation)
+        for start_index, end_index, aligned_pronunciation in aligned_pronunciations
+    }
+    current_node_index = 0
+    while current_node_index < len(nodes):
+        alignment_info = aligned_pronunciation_table.get(current_node_index)
+        if alignment_info is None:
+            aligned_nodes.append(cast(MarineFeature, dict(nodes[current_node_index])))
+            current_node_index += 1
+            continue
+
+        end_index, aligned_pronunciation = alignment_info
+        merged_node = cast(MarineFeature, dict(nodes[current_node_index]))
+        if end_index > current_node_index:
+            merged_node["surface"] = "".join(
+                str(nodes[node_index]["surface"])
+                for node_index in range(current_node_index, end_index + 1)
+            )
+            is_modified = True
+        if merged_node["pron"] != aligned_pronunciation:
+            merged_node["pron"] = aligned_pronunciation
+            is_modified = True
+        aligned_nodes.append(merged_node)
+        current_node_index = end_index + 1
+
+    if is_modified is False:
+        return None
+
+    return aligned_nodes
+
+
 def process(
     nodes: list[MarineFeature],
     feature_set: FeatureSet,
@@ -960,12 +1117,12 @@ def process(
         for key, value in original_labels.items()
     }
 
-    # convert nodes to feature seqs
-    feature = feature_set.convert_nodes_to_feature(nodes)
-
     # convert original pron in annotation to id seqs
-
     original_mora = cast(list[str], pron2mora(pron))
+
+    # convert nodes to feature seqs
+    feature_source_nodes = nodes
+    feature = feature_set.convert_nodes_to_feature(feature_source_nodes)
 
     expected_ids = feature_set.convert_feature_to_id("mora", original_mora)
 
@@ -996,10 +1153,38 @@ def process(
         extracted_moras,
         expected_moras,
     )
-    is_surface_aligned = is_surface_aligned_mora_sequence(
-        nodes,
-        expected_moras,
-    )
+    surface_aligned_nodes = None
+    is_surface_aligned = False
+    if extracted_moras != expected_moras and is_softmatched is False:
+        surface_aligned_nodes = build_surface_aligned_nodes(
+            nodes,
+            original_mora,
+        )
+        if surface_aligned_nodes is not None:
+            feature_source_nodes = surface_aligned_nodes
+            feature = feature_set.convert_nodes_to_feature(feature_source_nodes)
+            punct_removed_extracted_mora = feature["mora"][
+                np.isin(
+                    feature["mora"], punctuation_ids, invert=True
+                )  # 発音しない記号は除外している
+            ]
+            extracted_moras = cast(
+                list[str],
+                feature_set.convert_id_to_feature(
+                    "mora", punct_removed_extracted_mora
+                ).tolist(),
+            )
+            extracted_txt = "".join(extracted_moras)
+            is_softmatched = is_softmatch_mora_sequence(
+                extracted_moras,
+                expected_moras,
+            )
+            is_surface_aligned = True
+        else:
+            is_surface_aligned = is_surface_aligned_mora_sequence(
+                nodes,
+                expected_moras,
+            )
     remapped_labels = None
     if required_ap_accent is True and extracted_moras != expected_moras:
         remapped_labels = _remap_ap_labels_by_mora_alignment(

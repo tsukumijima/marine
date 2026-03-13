@@ -175,11 +175,13 @@ def detect_exact_duplicate_annotations(
             continue
 
         base_script_id = script_ids[0]
-        base_surface = texts[base_script_id]["text_level0"]
+        base_surface_signature = get_utterance_signature(texts[base_script_id])
 
         for compared_script_id in script_ids[1:]:
-            compared_surface = texts[compared_script_id]["text_level0"]
-            if base_surface != compared_surface:
+            compared_surface_signature = get_utterance_signature(
+                texts[compared_script_id]
+            )
+            if base_surface_signature != compared_surface_signature:
                 suspicious_pairs.append((base_script_id, compared_script_id))
 
     return suspicious_pairs
@@ -204,7 +206,7 @@ def detect_inconsistent_duplicate_surfaces(
     suspicious_surfaces: list[tuple[str, list[str]]] = []
 
     for script_id, text_item in texts.items():
-        surface_to_script_ids[text_item["text_level0"]].append(script_id)
+        surface_to_script_ids[get_utterance_signature(text_item)].append(script_id)
 
     for surface, script_ids in surface_to_script_ids.items():
         if len(script_ids) < 2:
@@ -215,6 +217,39 @@ def detect_inconsistent_duplicate_surfaces(
             suspicious_surfaces.append((surface, script_ids))
 
     return suspicious_surfaces
+
+
+def get_utterance_signature(text_item: dict[str, Any]) -> str:
+    """
+    annotation と対応づける実発話ベースの本文シグネチャを返す。
+
+    JSUT 系データでは `text_level0` が原文、`text_level2` が実際の発話文、
+    `kana_level3` が実際に発話された読みを表す。annotation は実発話に対応するため、
+    duplicate 判定もこの組み合わせを優先して比較する。
+
+    Args:
+        text_item (dict[str, Any]): `text.yaml` の各項目
+
+    Returns:
+        str: duplicate 判定用のシグネチャ
+    """
+
+    text_level2 = str(text_item.get("text_level2", "")).strip()
+    text_level0 = str(text_item.get("text_level0", "")).strip()
+    kana_level3 = str(text_item.get("kana_level3", "")).strip()
+    kana_level2 = str(text_item.get("kana_level2", "")).strip()
+    kana_level0 = str(text_item.get("kana_level0", "")).strip()
+
+    effective_text = text_level2 if len(text_level2) > 0 else text_level0
+    effective_kana = (
+        kana_level3
+        if len(kana_level3) > 0
+        else kana_level2
+        if len(kana_level2) > 0
+        else kana_level0
+    )
+
+    return f"{effective_text}\t{effective_kana}"
 
 
 def main(argv: list[str] | None = None) -> int:
