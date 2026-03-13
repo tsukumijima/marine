@@ -30,7 +30,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "corpus_dir",
         type=Path,
-        help="Directory that contains text.yaml and annotation.yaml.",
+        help="Directory that contains corpus.yaml (or legacy text.yaml + annotation.yaml).",
     )
     parser.add_argument(
         "--accent_status_seq_level",
@@ -223,33 +223,14 @@ def get_utterance_signature(text_item: dict[str, Any]) -> str:
     """
     annotation と対応づける実発話ベースの本文シグネチャを返す。
 
-    JSUT 系データでは `text_level0` が原文、`text_level2` が実際の発話文、
-    `kana_level3` が実際に発話された読みを表す。annotation は実発話に対応するため、
-    duplicate 判定もこの組み合わせを優先して比較する。
-
     Args:
-        text_item (dict[str, Any]): `text.yaml` の各項目
+        text_item (dict[str, Any]): corpus エントリの各項目
 
     Returns:
         str: duplicate 判定用のシグネチャ
     """
 
-    text_level2 = str(text_item.get("text_level2", "")).strip()
-    text_level0 = str(text_item.get("text_level0", "")).strip()
-    kana_level3 = str(text_item.get("kana_level3", "")).strip()
-    kana_level2 = str(text_item.get("kana_level2", "")).strip()
-    kana_level0 = str(text_item.get("kana_level0", "")).strip()
-
-    effective_text = text_level2 if len(text_level2) > 0 else text_level0
-    effective_kana = (
-        kana_level3
-        if len(kana_level3) > 0
-        else kana_level2
-        if len(kana_level2) > 0
-        else kana_level0
-    )
-
-    return f"{effective_text}\t{effective_kana}"
+    return str(text_item.get("text", "")).strip()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -265,12 +246,16 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = get_parser()
     args = parser.parse_args(argv)
-    texts = load_yaml(args.corpus_dir / "text.yaml")
-    annotations = load_yaml(args.corpus_dir / "annotation.yaml")
 
-    if set(texts.keys()) != set(annotations.keys()):
-        print("ERROR Text and annotation keys do not match.")
-        return 1
+    corpus = load_yaml(args.corpus_dir / "corpus.yaml")
+    texts = {
+        script_id: entry
+        for script_id, entry in corpus.items()
+    }
+    annotations = {
+        script_id: str(entry["annotation"])
+        for script_id, entry in corpus.items()
+    }
 
     invalid_script_ids = validate_parseable_annotations(
         annotations,

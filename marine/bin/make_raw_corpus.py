@@ -13,7 +13,6 @@ from tqdm import tqdm
 from marine.logger import getLogger
 from marine.types import AccentRepresentMode
 from marine.utils.g2p_util import pron2mora
-from marine.utils.jsut_source import select_jsut_surface_text
 from marine.utils.openjtalk_util import trans_hyphen2katakana
 
 
@@ -38,16 +37,10 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument("out_dir", default="./raw", type=Path, help="Output directory")
 
     parser.add_argument(
-        "--text_f_name",
+        "--corpus_f_name",
         type=str,
-        default="text.yaml",
-        help="text yaml file name.",
-    )
-    parser.add_argument(
-        "--annot_f_name",
-        type=str,
-        default="annotation.yaml",
-        help="annotation yaml file name.",
+        default="corpus.yaml",
+        help="Corpus yaml file name ({text, annotation} per entry).",
     )
     parser.add_argument(
         "--accent_status_seq_level",
@@ -280,32 +273,40 @@ def load_yaml_corpus(
     yaml_corpus_dir: Path,
     accent_status_seq_level: str,
     accent_status_represent_mode: AccentRepresentMode,
-    text_file_name: str,
-    annotation_file_name: str,
+    corpus_file_name: str,
     logger: logging.Logger,
 ) -> list[dict[str, str]]:
-    text_yaml_path = yaml_corpus_dir / text_file_name
-    annotation_yaml_path = yaml_corpus_dir / annotation_file_name
+    """
+    YAML corpus をロードして raw corpus エントリ群を返す。
 
+    各エントリは `{text, annotation}` の 2 フィールドを持つ。
+
+    Args:
+        yaml_corpus_dir (Path): YAML ファイルが格納されたディレクトリ
+        accent_status_seq_level (str): アクセント系列粒度
+        accent_status_represent_mode (AccentRepresentMode): アクセント表現モード
+        corpus_file_name (str): corpus YAML ファイル名
+        logger (logging.Logger): ロガー
+
+    Returns:
+        list[dict[str, str]]: raw corpus エントリ群
+    """
+
+    corpus_yaml_path = yaml_corpus_dir / corpus_file_name
     scripts: list[dict[str, str]] = []
 
-    with open(text_yaml_path, encoding="utf-8") as file:
-        texts = yaml.safe_load(file)
+    with open(corpus_yaml_path, encoding="utf-8") as file:
+        corpus = yaml.safe_load(file)
 
-    with open(annotation_yaml_path, encoding="utf-8") as file:
-        annotations = yaml.safe_load(file)
-
-    assert texts.keys() == annotations.keys(), "Not matched text and annotations"
-
-    for script_id in tqdm(texts.keys(), "Parse anntoations"):
-        features = {}
-
-        surface = select_jsut_surface_text(texts[script_id])
-        annotation = annotations[script_id]
+    for script_id in tqdm(corpus.keys(), "Parse annotations"):
+        entry = corpus[script_id]
+        surface = str(entry["text"])
+        annotation = str(entry["annotation"])
         feature = parse_jsut_annotation(
             annotation, accent_status_seq_level, accent_status_represent_mode
         )
 
+        features: dict[str, str] = {}
         features["script_id"] = script_id
         features["surface"] = surface
         features.update(feature)
@@ -328,8 +329,7 @@ def entry(argv: list[str] = sys.argv) -> None:
         args.in_path,
         args.accent_status_seq_level,
         args.accent_status_represent_mode,
-        args.text_f_name,
-        args.annot_f_name,
+        args.corpus_f_name,
         logger,
     )
 

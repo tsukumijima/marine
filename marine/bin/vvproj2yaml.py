@@ -13,7 +13,6 @@ from marine.logger import getLogger
 from marine.types import AccentRepresentMode
 from marine.utils.g2p_util.util import CANONICAL_MORA_BY_PHONEMES, PHON_TABLE
 from marine.utils.jsut_annotation import get_annotation_structure_errors
-from marine.utils.jsut_source import reorder_text_entry_fields
 from marine.utils.util import normalize_punctuation_characters
 
 
@@ -32,7 +31,7 @@ def get_parser() -> argparse.ArgumentParser:
     """
 
     parser = argparse.ArgumentParser(
-        description="Convert vvproj or aisp files to marine yaml corpus files.",
+        description="Convert vvproj or aisp files to marine corpus.yaml.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -43,7 +42,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "out_dir",
         type=Path,
-        help="Output directory for text.yaml and annotation.yaml.",
+        help="Output directory for corpus.yaml.",
     )
     parser.add_argument(
         "--script-id-prefix",
@@ -468,9 +467,9 @@ def build_corpus_entries(
     accent_status_seq_level: str,
     accent_status_represent_mode: AccentRepresentMode,
     strip_text_prefix_pattern: re.Pattern[str] | None,
-) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+) -> dict[str, dict[str, str]]:
     """
-    入力ディレクトリから `text.yaml` / `annotation.yaml` の内容を構築する。
+    入力ディレクトリから `corpus.yaml` の内容を構築する。
 
     Args:
         source_dir (Path): `vvproj` / `aisp` を含む入力ディレクトリ
@@ -481,11 +480,10 @@ def build_corpus_entries(
         strip_text_prefix_pattern (re.Pattern[str] | None): 明示指定された prefix 除去用正規表現
 
     Returns:
-        tuple[dict[str, dict[str, str]], dict[str, str]]: `text.yaml` と `annotation.yaml`
+        dict[str, dict[str, str]]: script id ごとの `{text, annotation}` エントリ
     """
 
-    text_entries: dict[str, dict[str, str]] = {}
-    annotations: dict[str, str] = {}
+    corpus_entries: dict[str, dict[str, str]] = {}
     current_index = 1
 
     for project_path in discover_project_paths(source_dir):
@@ -518,24 +516,14 @@ def build_corpus_entries(
                 accent_status_seq_level=accent_status_seq_level,
                 accent_status_represent_mode=accent_status_represent_mode,
             )
-            kana_text = extract_kana_from_annotation(annotation)
-            phone_level3 = build_phone_level3_from_accent_phrases(accent_phrases)
 
-            annotations[script_id] = annotation
-            text_entries[script_id] = reorder_text_entry_fields(
-                {
-                    "text_level0": surface,
-                    "kana_level0": kana_text,
-                    "text_level1": surface,
-                    "text_level2": surface,
-                    "kana_level2": kana_text,
-                    "kana_level3": kana_text,
-                    "phone_level3": phone_level3,
-                }
-            )
+            corpus_entries[script_id] = {
+                "text": surface,
+                "annotation": annotation,
+            }
             current_index += 1
 
-    return text_entries, annotations
+    return corpus_entries
 
 
 def write_yaml(path: Path, content: dict[str, Any]) -> None:
@@ -582,7 +570,7 @@ def entry(argv: list[str] = sys.argv) -> None:
     if args.strip_text_prefix_regex is not None:
         strip_text_prefix_pattern = re.compile(args.strip_text_prefix_regex)
 
-    text_entries, annotations = build_corpus_entries(
+    corpus_entries = build_corpus_entries(
         source_dir=args.source_dir,
         script_id_prefix=script_id_prefix,
         script_id_padding=args.script_id_padding,
@@ -595,12 +583,11 @@ def entry(argv: list[str] = sys.argv) -> None:
     )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    write_yaml(args.out_dir / "text.yaml", text_entries)
-    write_yaml(args.out_dir / "annotation.yaml", annotations)
+    write_yaml(args.out_dir / "corpus.yaml", corpus_entries)
 
     assert logger is not None
     logger.info(
-        f"Converted vvproj corpus. scripts: {len(text_entries)}, output: {args.out_dir}"
+        f"Converted vvproj corpus. scripts: {len(corpus_entries)}, output: {args.out_dir}"
     )
 
 

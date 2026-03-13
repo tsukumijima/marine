@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from marine.bin.vvproj2corpus import (
+from marine.bin.vvproj2yaml import (
     build_annotation_from_accent_phrases,
     build_corpus_entries,
     build_phone_level3_from_accent_phrases,
@@ -267,7 +267,7 @@ def test_build_corpus_entries_reads_aisp_projects(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    text_entries, annotations = build_corpus_entries(
+    corpus_entries = build_corpus_entries(
         source_dir=tmp_path,
         script_id_prefix="TEST",
         script_id_padding=4,
@@ -276,8 +276,8 @@ def test_build_corpus_entries_reads_aisp_projects(tmp_path: Path) -> None:
         strip_text_prefix_pattern=None,
     )
 
-    assert text_entries["TEST_0001"]["text_level0"] == "流し斬りが入る."
-    assert annotations["TEST_0001"] == "^ナ[ガ$"
+    assert corpus_entries["TEST_0001"]["text"] == "流し斬りが入る."
+    assert corpus_entries["TEST_0001"]["annotation"] == "^ナ[ガ$"
 
 
 def test_build_corpus_entries_skips_items_without_accent_phrases(
@@ -331,7 +331,7 @@ def test_build_corpus_entries_skips_items_without_accent_phrases(
         encoding="utf-8",
     )
 
-    text_entries, annotations = build_corpus_entries(
+    corpus_entries = build_corpus_entries(
         source_dir=tmp_path,
         script_id_prefix="TEST",
         script_id_padding=4,
@@ -340,5 +340,4 @@ def test_build_corpus_entries_skips_items_without_accent_phrases(
         strip_text_prefix_pattern=None,
     )
 
-    assert list(text_entries.keys()) == ["TEST_0001"]
-    assert list(annotations.keys()) == ["TEST_0001"]
+    assert list(corpus_entries.keys()) == ["TEST_0001"]
