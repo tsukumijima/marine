@@ -106,9 +106,9 @@ def test_duplicate_detection_does_not_flag_same_text_same_annotation() -> None:
     assert detect_exact_duplicate_annotations(texts, annotations) == []
 
 
-def test_inconsistent_duplicate_surface_detection_flags_same_text_different_annotation() -> None:
+def test_inconsistent_duplicate_surface_detection_ignores_different_readings() -> None:
     # BASIC5000_3256 / BASIC5000_4158: 同一テキストだが「苗代」の読みが異なる
-    ## 「なわしろ」 vs 「いなしろ」 でアノテーションが異なる
+    ## 「なわしろ」 vs 「いなしろ」 は読みが違う別の発話なので不整合にはならない
     text = "また、唐代中期以降は、直播き式であった稲作は、苗代式に変わっていった。"
     texts = {
         "BASIC5000_3256": {
@@ -123,6 +123,28 @@ def test_inconsistent_duplicate_surface_detection_flags_same_text_different_anno
     annotations = {
         "BASIC5000_3256": ANNOTATION_3256,
         "BASIC5000_4158": ANNOTATION_4158,
+    }
+
+    assert detect_inconsistent_duplicate_surfaces(texts, annotations) == []
+
+
+def test_inconsistent_duplicate_surface_detection_flags_same_reading_different_prosody() -> None:
+    # 同一テキスト・同一読みだがプロソディ (アクセント位置) だけ異なる場合は不整合として検出
+    ## BASIC5000_0001 のアクセント位置を変えた不正なペア
+    texts = {
+        "correct": {
+            "text": "水をマレーシアから買わなくてはならないのです。",
+            "annotation": ANNOTATION_0001,
+        },
+        "wrong_prosody": {
+            "text": "水をマレーシアから買わなくてはならないのです。",
+            # 同じ読みだがアクセント位置を変えたもの (マ[レ]ーシア → マ]レーシア)
+            "annotation": "^ミ[ズヲ#マ]レーシアカラ#カ[ワナ]クテワ#ナ[ラ]ナイノデス$",
+        },
+    }
+    annotations = {
+        "correct": ANNOTATION_0001,
+        "wrong_prosody": "^ミ[ズヲ#マ]レーシアカラ#カ[ワナ]クテワ#ナ[ラ]ナイノデス$",
     }
 
     inconsistent = detect_inconsistent_duplicate_surfaces(texts, annotations)

@@ -10,6 +10,7 @@ import yaml
 from marine.bin.make_raw_corpus import parse_jsut_annotation
 from marine.types import AccentRepresentMode
 from marine.utils.jsut_annotation import get_annotation_structure_errors
+from marine.utils.jsut_source import strip_jsut_annotation_symbols
 
 
 SUSPICIOUS_TERMINAL_MARKER_PATTERN = re.compile(r"[#_]\\?\$$")
@@ -223,6 +224,10 @@ def get_utterance_signature(text_item: dict[str, Any]) -> str:
     """
     annotation と対応づける実発話ベースの本文シグネチャを返す。
 
+    同一テキストでも読みが異なる場合（例: 「苗代」→ なわしろ / いなしろ）は
+    異なるシグネチャとなるよう、annotation からプロソディ記号を除去した読みも
+    シグネチャに含める。
+
     Args:
         text_item (dict[str, Any]): corpus エントリの各項目
 
@@ -230,7 +235,12 @@ def get_utterance_signature(text_item: dict[str, Any]) -> str:
         str: duplicate 判定用のシグネチャ
     """
 
-    return str(text_item.get("text", "")).strip()
+    text_field = str(text_item.get("text", "")).strip()
+    annotation = str(text_item.get("annotation", "")).strip()
+    # annotation からプロソディ記号を除去し、純粋な読み (カタカナ) を取得する
+    pronunciation = strip_jsut_annotation_symbols(annotation) if len(annotation) > 0 else ""
+
+    return f"{text_field}\t{pronunciation}"
 
 
 def main(argv: list[str] | None = None) -> int:

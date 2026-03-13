@@ -272,7 +272,14 @@ def select_jsut_surface_text(text_item: dict[str, Any]) -> str:
     if len(text_level2) > 0:
         return text_level2
 
-    return str(text_item["text_level0"])
+    text_level0 = str(text_item.get("text_level0", "")).strip()
+    if len(text_level0) > 0:
+        return text_level0
+
+    raise KeyError(
+        "Neither 'text_level2' nor 'text_level0' found in text item: "
+        f"{list(text_item.keys())}"
+    )
 
 
 def reorder_text_entry_fields(

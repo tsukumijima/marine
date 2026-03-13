@@ -36,10 +36,10 @@ def get_parser() -> argparse.ArgumentParser:
         help="Optional explicit path to wrong_mora_info.csv.",
     )
     parser.add_argument(
-        "--text-yaml-path",
+        "--corpus-yaml-path",
         type=Path,
         default=None,
-        help="Optional explicit path to text.yaml.",
+        help="Optional explicit path to corpus.yaml.",
     )
     return parser
 
@@ -94,24 +94,24 @@ def discover_wrong_mora_info_path(recipe_dir: Path) -> Path:
     return candidate_paths[0]
 
 
-def load_text_data(text_yaml_path: Path) -> dict[str, dict[str, Any]]:
+def load_corpus_data(corpus_yaml_path: Path) -> dict[str, dict[str, Any]]:
     """
-    `text.yaml` を script id 辞書として読み込む。
+    `corpus.yaml` を script id 辞書として読み込む。
 
     Args:
-        text_yaml_path (Path): `text.yaml` のパス
+        corpus_yaml_path (Path): `corpus.yaml` のパス
 
     Returns:
         dict[str, dict[str, Any]]: script id をキーとする辞書
     """
 
-    with open(text_yaml_path, encoding="utf-8") as file:
-        loaded_text_data = yaml.safe_load(file)
+    with open(corpus_yaml_path, encoding="utf-8") as file:
+        loaded_corpus_data = yaml.safe_load(file)
 
-    if loaded_text_data is None:
+    if loaded_corpus_data is None:
         return {}
 
-    return dict(loaded_text_data)
+    return dict(loaded_corpus_data)
 
 
 def iter_wrong_mora_rows(wrong_mora_info_path: Path) -> list[dict[str, str]]:
@@ -160,20 +160,20 @@ def main(argv: list[str] | None = None) -> None:
     if wrong_mora_info_path is None:
         wrong_mora_info_path = discover_wrong_mora_info_path(recipe_dir)
 
-    text_yaml_path = args.text_yaml_path
-    if text_yaml_path is None:
-        text_yaml_path = recipe_dir / "data" / "text.yaml"
+    corpus_yaml_path = args.corpus_yaml_path
+    if corpus_yaml_path is None:
+        corpus_yaml_path = recipe_dir / "data" / "corpus.yaml"
 
-    text_data = load_text_data(text_yaml_path)
+    corpus_data = load_corpus_data(corpus_yaml_path)
     wrong_mora_rows = iter_wrong_mora_rows(wrong_mora_info_path)
 
     for wrong_mora_row in wrong_mora_rows:
         wav_id = wrong_mora_row["wav"]
         print(f"\n========== {wav_id} ==========")
 
-        text_item = text_data.get(wav_id)
-        if text_item is not None and "text_level0" in text_item:
-            print(f"       Text : {text_item['text_level0']}")
+        corpus_item = corpus_data.get(wav_id)
+        if corpus_item is not None and "text" in corpus_item:
+            print(f"       Text : {corpus_item['text']}")
 
         print_diff_hl(wrong_mora_row["jtalk"], wrong_mora_row["annotation"])
 

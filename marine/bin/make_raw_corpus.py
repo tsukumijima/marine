@@ -298,6 +298,12 @@ def load_yaml_corpus(
     with open(corpus_yaml_path, encoding="utf-8") as file:
         corpus = yaml.safe_load(file)
 
+    if corpus is None or not isinstance(corpus, dict):
+        raise ValueError(
+            f"Invalid corpus yaml (expected a dict, got {type(corpus).__name__}): "
+            f"{corpus_yaml_path}"
+        )
+
     for script_id in tqdm(corpus.keys(), "Parse annotations"):
         entry = corpus[script_id]
         surface = str(entry["text"])
