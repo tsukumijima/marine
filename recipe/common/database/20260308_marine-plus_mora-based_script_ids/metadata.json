@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "script_count": 9600,
-  "script_ids_hash": "3c5277b332915eb543495931e2d67b6806c1f1f95cf9afb5487e297914e03354",
+  "script_count": 9512,
+  "script_ids_hash": "a904a70bbe947e15db0137b79d04e84b4eadbaef6ca3631951a7590ba7fcd39c",
   "random_seed": 12345,
   "test_size": 100
 }

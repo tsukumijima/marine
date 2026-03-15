@@ -49,9 +49,9 @@ SAFE_MORA_SUBSTITUTIONS: set[tuple[str, str]] = {
 }
 KANJI_SURFACE_PATTERN = re.compile(r"^[一-龯々]+$")
 PURE_KANA_SURFACE_PATTERN = re.compile(r"^[ぁ-んァ-ヴー゛゜ゝゞヽヾヷ-ヺ]+$")
-# OpenJTalk は rare モーラを含むカナ語を細かく分割することがある。
-## その場合でも、surface 候補から expected pronunciation を安全に説明できるなら
-## node を結合して救済したいので、結合候補には漢字だけでなくカナ連接も含める。
+# OpenJTalk の形態素解析は複合語やカナ語を複数ノードに分割することがある。
+## dataset 側の単語境界と一致しない場合に隣接ノードを結合して照合を試みるため、
+## 結合候補として漢字・カナ・数字の連接を許容する。
 MERGEABLE_SURFACE_PATTERN = re.compile(
     r"^[一-龯々ぁ-んァ-ヴー゛゜ゝゞヽヾヷ-ヺ0-9０-９]+$",
 )
@@ -86,6 +86,7 @@ VOICE_NORMALIZATION_TABLE = str.maketrans(
         "ヴ": "ウ",
     }
 )
+# 隣接ノード結合の最大スパン (形態素解析の分割が dataset と合わない場合に結合を試みる範囲)
 MAX_ALIGNMENT_NODE_SPAN = 4
 
 SURFACE_PRONUNCIATION_VARIANTS: dict[str, set[str]] = {
@@ -323,13 +324,18 @@ def _normalize_vowel_sequences_for_alignment(text: str) -> str:
 
 def _normalize_pronunciation_for_alignment(text: str) -> str:
     """
-    話し言葉の代表的な長音揺れを吸収しやすい形へ発音列を正規化する。
+    アライメント比較用に発音列を正規化する。
+
+    以下の揺れを吸収する。
+    - 長音表記揺れ (カア→カー 等)
+    - 外来語モーラの標準化 (ティ→チ, ヴァ→バ 等: いずれもモーラ数は変化しない)
+    - 四つ仮名の揺れ (ヲ→オ, ヅ→ズ, ヂ→ジ)
 
     Args:
         text (str): カタカナ発音列
 
     Returns:
-        str: 長音・四つ仮名の揺れを吸収した比較用の発音列
+        str: 表記揺れを吸収した比較用の発音列
     """
 
     normalized_text = text
@@ -388,6 +394,9 @@ def _normalize_pronunciation_for_alignment(text: str) -> str:
         r"\1ー",
         normalized_text,
     )
+    # 外来語モーラを対応する標準モーラへ正規化する
+    ## OpenJTalk の辞書が外来語モーラ未対応で標準モーラを返す場合に一致させるための措置
+    ## いずれの置換もモーラ数を変えない (1モーラ→1モーラ) ため、モーラ境界への影響はない
     normalized_text = (
         normalized_text.replace("ティ", "チ")
         .replace("ディ", "ジ")
@@ -514,6 +523,9 @@ def _get_surface_candidate_moras(
     """
 
     candidate_pronunciations: list[str] = [extracted_pronunciation]
+    # surface がカナのみで構成される場合、surface 自体を pronunciation 候補に加える
+    ## OpenJTalk が外来語モーラ (ティ, ヴァ 等) を標準モーラで返す場合に、
+    ## surface 由来の正しい読みで照合できるようにするため
     if PURE_KANA_SURFACE_PATTERN.fullmatch(surface) is not None:
         candidate_pronunciations.append(surface)
     allowed_variants = SURFACE_PRONUNCIATION_VARIANTS.get(surface)
