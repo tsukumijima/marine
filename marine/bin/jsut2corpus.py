@@ -316,7 +316,7 @@ def entry(argv: list[str] = sys.argv) -> None:
 
     today = datetime.date.today().strftime("%y%m%d")
     with open(
-        args.out_dir / f"just_corpus_{today}.json", "w", encoding="utf-8"
+        args.out_dir / f"jsut_corpus_{today}.json", "w", encoding="utf-8"
     ) as file:
         json.dump(scripts, file, ensure_ascii=False, indent=4, separators=(",", ": "))
 
