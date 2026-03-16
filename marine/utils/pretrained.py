@@ -74,7 +74,12 @@ def retrieve_pretrained_model(version: str | None = None) -> Path:
             urlretrieve(url, filename, reporthook=t.update_to)
             t.total = t.n
         with tarfile.open(filename, mode="r|gz") as f:
-            f.extractall(path=out_dir)
+            # Python 3.12 以降では filter 引数なしの extractall() が DeprecationWarning を出すため、
+            # filter="data" を指定する (Python 3.10 等で filter 未サポートの場合はフォールバック)
+            try:
+                f.extractall(path=out_dir, filter="data")
+            except TypeError:
+                f.extractall(path=out_dir)
         os.remove(filename)
 
     return out_dir

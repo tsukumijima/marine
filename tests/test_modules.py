@@ -151,9 +151,11 @@ def test_viterbi_decode_top_k():
 
     # Test that pairwise potentials effect the sequence correctly and that
     # viterbi_decode can handle -inf values.
+    # 最初の行だけ tag 4 のスコアを高くして tie-break を一意にする
+    # (全行同スコアだとプラットフォーム依存で結果が変わるため)
     sequence_logits = torch.FloatTensor(
         [
-            [0, 0, 0, 3, 4],
+            [0, 0, 0, 3, 5],
             [0, 0, 0, 3, 4],
             [0, 0, 0, 3, 4],
             [0, 0, 0, 3, 4],
@@ -166,7 +168,7 @@ def test_viterbi_decode_top_k():
     for i in range(5):
         transition_matrix[i, i] = float("-inf")
     indices, _ = viterbi_decode(sequence_logits, transition_matrix, top_k=5)
-    assert indices[0] == [3, 4, 3, 4, 3, 4]
+    assert indices[0] == [4, 3, 4, 3, 4, 3]
 
     # Test that unbalanced pairwise potentials break ties
     # between paths with equal unary potentials.
