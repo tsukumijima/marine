@@ -15,7 +15,9 @@ ANNOTATION_0002 = (
     "ナ[ンノ#シ[ンテンモ#ナ]イママ#シュ[ーリョーシマ]シタ$"
 )
 # BASIC5000_0003: 上院議員は私がデータをゆがめたと告発した。
-ANNOTATION_0003 = "^ジョ[ーインギ]ーンワ_ワ[タシガ#デ]ータヲ#ユ[ガ]メタト#コ[クハツシタ$"
+ANNOTATION_0003 = (
+    "^ジョ[ーインギ]ーンワ_ワ[タシガ#デ]ータヲ#ユ[ガ]メタト#コ[クハツシタ$"
+)
 # BASIC5000_0006: 週に四回、フランスの授業があります。
 ANNOTATION_0006 = "^シュ]ーニ#ヨ[ンカイ_フ[ランスノ#ジュ]ギョーガ#ア[リマ]ス$"
 # BASIC5000_0206: 歩いて行くの、それとも、バスで行くの。(疑問文)
@@ -26,7 +28,9 @@ ANNOTATION_1177 = (
     "ソ[ノママ#シ[ンサツ]シツエト#ツ[レテイカレタ$"
 )
 # BASIC5000_1178: 吉雄は私がその箱を持ち上げるのを手伝ってくれた。
-ANNOTATION_1178 = "^ヨ[シオワ_ワ[タシガ#ソ[ノ#ハ[コヲ#モ[チアゲ]ルノヲ#テ[ツダ]ッテクレタ$"
+ANNOTATION_1178 = (
+    "^ヨ[シオワ_ワ[タシガ#ソ[ノ#ハ[コヲ#モ[チアゲ]ルノヲ#テ[ツダ]ッテクレタ$"
+)
 # BASIC5000_3256: また、唐代中期以降は、直播き式であった稲作は、苗代式に変わっていった。
 # 「苗代」を「なわしろ」と読む場合
 ANNOTATION_3256 = (
@@ -128,7 +132,9 @@ def test_inconsistent_duplicate_surface_detection_ignores_different_readings() -
     assert detect_inconsistent_duplicate_surfaces(texts, annotations) == []
 
 
-def test_inconsistent_duplicate_surface_detection_flags_same_reading_different_prosody() -> None:
+def test_inconsistent_duplicate_surface_detection_flags_same_reading_different_prosody() -> (
+    None
+):
     # 同一テキスト・同一読みだがプロソディ (アクセント位置) だけ異なる場合は不整合として検出
     ## BASIC5000_0001 のアクセント位置を変えた不正なペア
     texts = {

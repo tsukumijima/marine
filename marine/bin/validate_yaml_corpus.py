@@ -238,7 +238,9 @@ def get_utterance_signature(text_item: dict[str, Any]) -> str:
     text_field = str(text_item.get("text", "")).strip()
     annotation = str(text_item.get("annotation", "")).strip()
     # annotation からプロソディ記号を除去し、純粋な読み (カタカナ) を取得する
-    pronunciation = strip_jsut_annotation_symbols(annotation) if len(annotation) > 0 else ""
+    pronunciation = (
+        strip_jsut_annotation_symbols(annotation) if len(annotation) > 0 else ""
+    )
 
     return f"{text_field}\t{pronunciation}"
 
@@ -258,13 +260,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     corpus = load_yaml(args.corpus_dir / "corpus.yaml")
-    texts = {
-        script_id: entry
-        for script_id, entry in corpus.items()
-    }
+    texts = {script_id: entry for script_id, entry in corpus.items()}
     annotations = {
-        script_id: str(entry["annotation"])
-        for script_id, entry in corpus.items()
+        script_id: str(entry["annotation"]) for script_id, entry in corpus.items()
     }
 
     invalid_script_ids = validate_parseable_annotations(
