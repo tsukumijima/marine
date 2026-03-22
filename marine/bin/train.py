@@ -28,6 +28,7 @@ from marine.models import (
 )
 from marine.models.base_model import BaseModel
 from marine.utils.metrics import MultiTaskMetrics
+from marine.utils.openjtalk_metrics import OpenJTalkPracticalMetrics
 from marine.utils.util import (
     init_seed,
     log_scores,
@@ -40,6 +41,205 @@ from marine.utils.util import (
 
 DecoderModule = CRFDecoder | LinearDecoder | AttentionBasedLSTMDecoder
 logger: logging.Logger | None = None
+
+
+def _flatten_metric_scores(
+    phase: str,
+    loss: dict[str, float],
+    task_scores: dict[str, dict[str, float]],
+    extra_scores: dict[str, dict[str, float]] | None = None,
+) -> dict[str, float]:
+    """
+    checkpoint 選定用に評価値をフラットな辞書へ展開する。
+
+    Args:
+        phase (str): 評価フェーズ名
+        loss (dict[str, float]): タスクごとの損失
+        task_scores (dict[str, dict[str, float]]): `MultiTaskMetrics` の集計結果
+        extra_scores (dict[str, dict[str, float]] | None): 追加評価指標
+
+    Returns:
+        dict[str, float]: `phase/task/metric` 形式で展開したスカラー値
+    """
+
+    flattened_scores = {
+        f"{phase}/loss": sum(loss.values()),
+    }
+
+    for task, metric_scores in task_scores.items():
+        for metric_name, score in metric_scores.items():
+            flattened_scores[f"{phase}/{task}/{metric_name}"] = score
+
+    if extra_scores is not None:
+        for score_group, metric_scores in extra_scores.items():
+            for metric_name, score in metric_scores.items():
+                flattened_scores[f"{phase}/{score_group}/{metric_name}"] = score
+
+    return flattened_scores
+
+
+def _format_metric_value(metric_name: str, metric_value: float) -> str:
+    """
+    ログ表示用に評価値を整形する。
+
+    Args:
+        metric_name (str): 評価指標名
+        metric_value (float): 評価値
+
+    Returns:
+        str: 表示用の文字列
+    """
+
+    if metric_name.endswith("/loss"):
+        return f"{metric_value:.4f}"
+
+    return f"{metric_value:.4%}"
+
+
+def _is_better_metric(
+    current_metric_value: float,
+    best_metric_value: float,
+    metric_mode: str,
+) -> bool:
+    """
+    現在の評価値が既存ベストを更新したかどうかを判定する。
+
+    Args:
+        current_metric_value (float): 今回の評価値
+        best_metric_value (float): 既存ベストの評価値
+        metric_mode (str): `min` または `max`
+
+    Returns:
+        bool: ベスト更新時は `True`
+    """
+
+    if metric_mode == "min":
+        return current_metric_value < best_metric_value
+
+    if metric_mode == "max":
+        return current_metric_value > best_metric_value
+
+    raise ValueError(f"Unsupported best metric mode: {metric_mode}")
+
+
+def _resolve_scheduler_metric_name(config: DictConfig) -> str:
+    """
+    学習率 scheduler の更新に使う評価指標名を返す。
+
+    Args:
+        config (DictConfig): 学習設定
+
+    Returns:
+        str: scheduler 更新に使う評価指標名
+    """
+
+    scheduler_metric_name = OmegaConf.select(
+        config,
+        "train.scheduler_metric",
+        default=None,
+    )
+    if scheduler_metric_name is None:
+        return "val/loss"
+
+    return str(scheduler_metric_name)
+
+
+def _resolve_secondary_best_metric_name(config: DictConfig) -> str | None:
+    """
+    checkpoint 選定の副指標名を返す。
+
+    Args:
+        config (DictConfig): 学習設定
+
+    Returns:
+        str | None: 副指標名。未設定時は `None`
+    """
+
+    secondary_best_metric_name = OmegaConf.select(
+        config,
+        "train.secondary_best_metric",
+        default=None,
+    )
+    if secondary_best_metric_name is None:
+        return None
+
+    return str(secondary_best_metric_name)
+
+
+def _resolve_secondary_best_metric_mode(config: DictConfig) -> str:
+    """
+    checkpoint 選定の副指標モードを返す。
+
+    Args:
+        config (DictConfig): 学習設定
+
+    Returns:
+        str: `min` または `max`
+    """
+
+    secondary_best_metric_mode = OmegaConf.select(
+        config,
+        "train.secondary_best_metric_mode",
+        default=None,
+    )
+    if secondary_best_metric_mode is None:
+        return str(config.train.best_metric_mode)
+
+    return str(secondary_best_metric_mode)
+
+
+def _validate_metric_availability(
+    flattened_scores: dict[str, float],
+    metric_name: str,
+    metric_role: str,
+) -> None:
+    """
+    指定された評価指標が集計結果に含まれているかを検証する。
+
+    Args:
+        flattened_scores (dict[str, float]): 集計済みの評価値
+        metric_name (str): 検証対象の評価指標名
+        metric_role (str): エラーメッセージ用の役割名
+    """
+
+    if metric_name in flattened_scores:
+        return
+
+    available_metric_names = ", ".join(sorted(flattened_scores.keys()))
+    raise KeyError(
+        f"Configured {metric_role} is not available. "
+        f"{metric_role}: {metric_name}, "
+        f"available_metrics: {available_metric_names}"
+    )
+
+
+def _compare_metric_values(
+    current_metric_value: float,
+    best_metric_value: float,
+    metric_mode: str,
+) -> int:
+    """
+    評価値同士の優劣を比較する。
+
+    Args:
+        current_metric_value (float): 今回の評価値
+        best_metric_value (float): 既存ベストの評価値
+        metric_mode (str): `min` または `max`
+
+    Returns:
+        int: 改善時は `1`、同値時は `0`、劣化時は `-1`
+    """
+
+    if torch.isclose(
+        torch.tensor(current_metric_value),
+        torch.tensor(best_metric_value),
+    ):
+        return 0
+
+    if _is_better_metric(current_metric_value, best_metric_value, metric_mode) is True:
+        return 1
+
+    return -1
 
 
 def save_checkpoint(
@@ -123,7 +323,14 @@ def train_model(
 ) -> None:
     assert logger is not None
     phases = ["train", "val"]
-    min_val_loss = float("inf")
+    best_metric_mode = config.train.best_metric_mode
+    best_metric_value = float("inf") if best_metric_mode == "min" else float("-inf")
+    secondary_best_metric_name = _resolve_secondary_best_metric_name(config)
+    secondary_best_metric_mode = _resolve_secondary_best_metric_mode(config)
+    secondary_best_metric_value = (
+        float("inf") if secondary_best_metric_mode == "min" else float("-inf")
+    )
+    epochs_without_improvement = 0
     fig_logging_targets = random.choices(range(config.data.batch_size), k=10)
 
     if "accent_status" in tasks:
@@ -159,16 +366,23 @@ def train_model(
                 require_ap_level_f1_score=has_att_based_model,
                 device=device,
             )
+            openjtalk_metrics = OpenJTalkPracticalMetrics(
+                accent_represent_mode=config.data.represent_mode,
+            )
 
-            for batch_index, (inputs, outputs, _, script_ids) in enumerate(
-                tqdm(phase_dataloader, desc=f"{phase}: ", leave=False)
-            ):
+            for batch_index, (
+                inputs,
+                outputs,
+                morph_boundaries,
+                script_ids,
+            ) in enumerate(tqdm(phase_dataloader, desc=f"{phase}: ", leave=False)):
                 # pack inputs to device
                 inputs = pack_inputs(inputs, config.data.input_keys, device)
                 outputs = pack_outputs(outputs, device)
 
                 # total loss of the tasks on a single batch
                 batch_loss: torch.Tensor | None = None
+                batch_predicts: dict[str, torch.Tensor] = {}
                 prev_decoder_output: dict[str, torch.Tensor] = {}
 
                 optimizer.zero_grad()
@@ -225,6 +439,7 @@ def train_model(
 
                         # logits: (B, T, dim) -> (B, T)
                         predicts = torch.argmax(logits, dim=2)
+                        batch_predicts[task] = predicts
 
                         # Update metrics
                         # for ap-based seq
@@ -274,12 +489,32 @@ def train_model(
                                 inputs["prev_decoder_outputs"][task] = _output
                                 inputs["decoder_targets"] = None
 
+                openjtalk_metrics.update(
+                    predicts=batch_predicts,
+                    outputs=outputs,
+                    morph_boundaries=morph_boundaries,
+                    is_ap_based_accent_status=has_att_based_model,
+                )
+
                 if is_train and batch_loss is not None:
                     batch_loss.backward()
+                    max_grad_norm = OmegaConf.select(
+                        config,
+                        "train.max_grad_norm",
+                        default=None,
+                    )
+                    if max_grad_norm is not None:
+                        torch.nn.utils.clip_grad_norm_(
+                            model.parameters(),
+                            max_norm=max_grad_norm,
+                        )
                     optimizer.step()
 
             epoch_loss = {
                 task: running_loss[task] / len(dataloader[phase]) for task in tasks
+            }
+            openjtalk_score_group = {
+                "openjtalk_compatible": openjtalk_metrics.compute(),
             }
 
             # Logging scores
@@ -289,24 +524,117 @@ def train_model(
                 tasks,
                 metrics,
                 loss=epoch_loss,
+                extra_scores=openjtalk_score_group,
                 tensorboard_writer=tensorboard_writer,
             )
 
             if not is_train:
-                current_val_loss = sum(epoch_loss.values())
+                task_scores = metrics.compute()
+                flattened_scores = _flatten_metric_scores(
+                    phase,
+                    epoch_loss,
+                    task_scores,
+                    openjtalk_score_group,
+                )
 
-                # update schedule with validation loss
-                scheduler.step(current_val_loss)
+                if isinstance(
+                    scheduler,
+                    torch.optim.lr_scheduler.ReduceLROnPlateau,
+                ):
+                    scheduler_metric_name = _resolve_scheduler_metric_name(config)
+                    _validate_metric_availability(
+                        flattened_scores,
+                        scheduler_metric_name,
+                        "scheduler_metric",
+                    )
+
+                    scheduler_metric_value = flattened_scores[scheduler_metric_name]
+                    scheduler.step(scheduler_metric_value)
+                    logger.info(
+                        "val / scheduler | "
+                        f"metric : {scheduler_metric_name} | "
+                        f"score : {_format_metric_value(scheduler_metric_name, scheduler_metric_value)}"
+                    )
+                else:
+                    scheduler.step()
+
                 epoch_lr = optimizer.param_groups[0]["lr"]
                 if tensorboard_writer is not None:
                     tensorboard_writer.add_scalar(
                         f"{phase}_learning_rate", epoch_lr, epoch
                     )
 
+                best_metric_name = config.train.best_metric
+
+                _validate_metric_availability(
+                    flattened_scores,
+                    best_metric_name,
+                    "best_metric",
+                )
+
+                current_best_metric_value = flattened_scores[best_metric_name]
+                logger.info(
+                    "val / checkpoint_selection | "
+                    f"metric : {best_metric_name} | "
+                    f"mode : {best_metric_mode} | "
+                    f"score : {_format_metric_value(best_metric_name, current_best_metric_value)}"
+                )
+
+                current_secondary_best_metric_value: float | None = None
+                if secondary_best_metric_name is not None:
+                    _validate_metric_availability(
+                        flattened_scores,
+                        secondary_best_metric_name,
+                        "secondary_best_metric",
+                    )
+                    current_secondary_best_metric_value = flattened_scores[
+                        secondary_best_metric_name
+                    ]
+                    logger.info(
+                        "val / checkpoint_selection | "
+                        f"secondary_metric : {secondary_best_metric_name} | "
+                        f"mode : {secondary_best_metric_mode} | "
+                        f"score : {_format_metric_value(secondary_best_metric_name, current_secondary_best_metric_value)}"
+                    )
+
                 # Save checkpoints
-                is_best = current_val_loss < min_val_loss
-                if is_best:
-                    min_val_loss = current_val_loss
+                primary_metric_comparison = _compare_metric_values(
+                    current_best_metric_value,
+                    best_metric_value,
+                    best_metric_mode,
+                )
+                is_best = primary_metric_comparison > 0
+
+                if (
+                    is_best is False
+                    and primary_metric_comparison == 0
+                    and secondary_best_metric_name is not None
+                    and current_secondary_best_metric_value is not None
+                ):
+                    secondary_metric_comparison = _compare_metric_values(
+                        current_secondary_best_metric_value,
+                        secondary_best_metric_value,
+                        secondary_best_metric_mode,
+                    )
+                    is_best = secondary_metric_comparison > 0
+
+                if is_best is True:
+                    best_metric_value = current_best_metric_value
+                    epochs_without_improvement = 0
+                    if current_secondary_best_metric_value is not None:
+                        secondary_best_metric_value = (
+                            current_secondary_best_metric_value
+                        )
+                    logger.info(
+                        "val / checkpoint_selection | "
+                        f"new best score : {_format_metric_value(best_metric_name, best_metric_value)}"
+                    )
+                else:
+                    epochs_without_improvement += 1
+                    logger.info(
+                        "val / checkpoint_selection | "
+                        f"epochs_without_improvement : {epochs_without_improvement}"
+                    )
 
                 save_checkpoint(
                     config,
@@ -320,6 +648,29 @@ def train_model(
 
         time_elapsed = time.time() - since
         logger.info(f"complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s")
+
+        early_stopping_patience = OmegaConf.select(
+            config,
+            "train.early_stopping_patience",
+            default=None,
+        )
+        early_stopping_min_epochs = OmegaConf.select(
+            config,
+            "train.early_stopping_min_epochs",
+            default=0,
+        )
+        if (
+            early_stopping_patience is not None
+            and epoch + 1 >= early_stopping_min_epochs
+            and epochs_without_improvement >= early_stopping_patience
+        ):
+            logger.info(
+                "Stop training early. "
+                f"epoch : {epoch}, "
+                f"early_stopping_patience : {early_stopping_patience}, "
+                f"epochs_without_improvement : {epochs_without_improvement}"
+            )
+            break
 
 
 @hydra.main(config_path="conf/train", config_name="config")

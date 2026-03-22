@@ -21,6 +21,7 @@ from marine.models import (
 )
 from marine.models.base_model import BaseModel
 from marine.utils.metrics import MultiTaskMetrics
+from marine.utils.openjtalk_metrics import OpenJTalkPracticalMetrics
 from marine.utils.util import (
     convert_readable_labels,
     group_by_script_id,
@@ -127,16 +128,20 @@ def test_model(
         require_ap_level_f1_score=has_att_based_model,
         device=device,
     )
+    openjtalk_metrics = OpenJTalkPracticalMetrics(
+        accent_represent_mode=config.data.represent_mode,
+    )
 
     total_logs = {task: {} for task in tasks}
 
-    for batch_index, (inputs, outputs, _, script_ids) in enumerate(
+    for batch_index, (inputs, outputs, morph_boundaries, script_ids) in enumerate(
         tqdm(phase_dataloader, desc=f"{phase}: ", leave=False)
     ):
         # pack inputs to device
         inputs = pack_inputs(inputs, config.data.input_keys, device)
         outputs = pack_outputs(outputs, device)
 
+        batch_predicts: dict[str, torch.Tensor] = {}
         prev_decoder_output: dict[str, torch.Tensor] = {}
 
         for task_index, task in enumerate(tasks):
@@ -173,6 +178,7 @@ def test_model(
 
             # logits: (B, T, dim) -> (B, T)
             predicts = torch.argmax(logits, dim=2)
+            batch_predicts[task] = predicts
 
             # Log predicts
             total_logs[task].update(
@@ -204,6 +210,13 @@ def test_model(
                 prev_decoder_output[task] = predicts
                 inputs["prev_decoder_outputs"][task] = predicts
 
+        openjtalk_metrics.update(
+            predicts=batch_predicts,
+            outputs=outputs,
+            morph_boundaries=morph_boundaries,
+            is_ap_based_accent_status=has_att_based_model,
+        )
+
     # Group by script_id
     total_logs = group_by_script_id(total_logs)
 
@@ -215,6 +228,7 @@ def test_model(
         metrics=metrics,
         logs=total_logs,
         loss=None,
+        extra_scores={"openjtalk_compatible": openjtalk_metrics.compute()},
         tensorboard_writer=tensorboard_writer,
     )
 

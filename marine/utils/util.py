@@ -718,11 +718,13 @@ def log_scores(
     metrics: MultiTaskMetrics,
     logs: dict[str, Any] | None = None,
     loss: dict[str, float] | None = None,
+    extra_scores: dict[str, dict[str, float]] | None = None,
     tensorboard_writer: Any | None = None,
 ) -> None:
     """Log scores"""
 
     scores = metrics.compute()
+    logging_tasks = list(tasks)
 
     # merge loss into score metrics
     if loss:
@@ -731,10 +733,14 @@ def log_scores(
 
     if logs:
         multiple_task_scores = calculate_multiple_task_scores(tasks, logs)
-        tasks += list(multiple_task_scores.keys())
+        logging_tasks += list(multiple_task_scores.keys())
         scores.update(multiple_task_scores)
 
-    for task in tasks:
+    if extra_scores:
+        logging_tasks += list(extra_scores.keys())
+        scores.update(extra_scores)
+
+    for task in logging_tasks:
         # logging to shell
         score_log = f"{phase} / {task} |" + " |".join(
             [
