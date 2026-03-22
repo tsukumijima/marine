@@ -76,6 +76,14 @@ class OpenJTalkPracticalMetrics:
             is_ap_based_accent_status (bool): `accent_status` が AP ベースかどうか
         """
 
+        if (
+            "accent_status" not in predicts
+            or "accent_phrase_boundary" not in predicts
+            or "accent_status" not in outputs
+            or "accent_phrase_boundary" not in outputs
+        ):
+            return
+
         for sample_index, morph_boundary in enumerate(morph_boundaries):
             predicted_accent_phrase_boundary = self._select_masked_tensor(
                 predicts=predicts,
@@ -193,6 +201,11 @@ class OpenJTalkPracticalMetrics:
         """
 
         if is_ap_based_accent_status is True:
+            # AP ベースの `convert_single_ap_based_accent_to_mora_based_accent()` は、
+            # `accent_represent_mode` と `accent_phrase_boundary_label` を使って0/1 のモーラ列へ復元する
+            ## そのままでは `convert_open_jtalk_format_label()` が期待する
+            ## `0=pad, 1=非アクセント核, 2=アクセント核` の符号化と 1 ずれるため、
+            ## pad を避けつつ `1/2` へそろえる目的で +1 する
             mora_based_accent_status = (
                 convert_single_ap_based_accent_to_mora_based_accent(
                     accent_status,

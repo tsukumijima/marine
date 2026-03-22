@@ -330,6 +330,21 @@ def train_model(
     secondary_best_metric_value = (
         float("inf") if secondary_best_metric_mode == "min" else float("-inf")
     )
+    max_grad_norm = OmegaConf.select(
+        config,
+        "train.max_grad_norm",
+        default=None,
+    )
+    early_stopping_patience = OmegaConf.select(
+        config,
+        "train.early_stopping_patience",
+        default=None,
+    )
+    early_stopping_min_epochs = OmegaConf.select(
+        config,
+        "train.early_stopping_min_epochs",
+        default=0,
+    )
     epochs_without_improvement = 0
     fig_logging_targets = random.choices(range(config.data.batch_size), k=10)
 
@@ -498,11 +513,6 @@ def train_model(
 
                 if is_train and batch_loss is not None:
                     batch_loss.backward()
-                    max_grad_norm = OmegaConf.select(
-                        config,
-                        "train.max_grad_norm",
-                        default=None,
-                    )
                     if max_grad_norm is not None:
                         torch.nn.utils.clip_grad_norm_(
                             model.parameters(),
@@ -649,16 +659,6 @@ def train_model(
         time_elapsed = time.time() - since
         logger.info(f"complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s")
 
-        early_stopping_patience = OmegaConf.select(
-            config,
-            "train.early_stopping_patience",
-            default=None,
-        )
-        early_stopping_min_epochs = OmegaConf.select(
-            config,
-            "train.early_stopping_min_epochs",
-            default=0,
-        )
         if (
             early_stopping_patience is not None
             and epoch + 1 >= early_stopping_min_epochs
