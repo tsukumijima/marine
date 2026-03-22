@@ -118,6 +118,7 @@ build-vocab = "python -m marine.bin.build_vocab"
 pack-corpus = "python -m marine.bin.pack_corpus"
 train-model = "python -m marine.bin.train"
 test-model = "python -m marine.bin.test"
+package-model = "python -m marine.bin.package_model"
 
 [tool.ruff]
 # 1行の長さを最大88文字に設定

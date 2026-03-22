@@ -7,9 +7,8 @@ save_optimizer_state: true
 save_test_log: true
 save_vocab_path: true
 upload_tensorboard_event: true
-best_metric: val/openjtalk_compatible/openjtalk_gt_ap_accent_status_morph_accuracy
+best_metric: val/openjtalk_compatible/openjtalk_accent_status_sentence_accuracy
 best_metric_mode: max
-secondary_best_metric: val/openjtalk_compatible/openjtalk_joint_morph_accuracy
 scheduler_metric: val/openjtalk_compatible/openjtalk_accent_status_sentence_accuracy
 max_grad_norm: 1.0
 
