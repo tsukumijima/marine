@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 DEFAULT_CACHE_DIR = join(os.path.expanduser("~"), ".cache", "marine")
 CACHE_DIR = os.environ.get("MARINE_CACHE_DIR", DEFAULT_CACHE_DIR)
 
-DEFAULT_VERSION = "v0.0.6-post1"
+DEFAULT_VERSION = "v0.0.6-post4"
 MODEL_BASE_URL = "https://github.com/tsukumijima/marine-plus/releases/download/"
 
 
