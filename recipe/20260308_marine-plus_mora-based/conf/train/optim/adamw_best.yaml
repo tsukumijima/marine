@@ -1,0 +1,13 @@
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 7e-4
+  eps: 1e-7
+  betas: [0.9, 0.999]
+  weight_decay: 0.01
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  mode: max
+  threshold: 1e-3
+  factor: 0.5
+  patience: 2

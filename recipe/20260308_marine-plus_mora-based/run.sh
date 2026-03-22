@@ -66,6 +66,7 @@ data=mora_based_seq
 model=mtl_lstm_encoder_crf_decoder
 criterions=loglikehood
 optim=adam
+optim=adamw_best
 
 # Setup directory for test
 checkpoint_dir=$model_dir/$tag
@@ -106,7 +107,6 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
         "optim=$optim"
         "train.out_dir=$model_dir"
         "train.model_name=$tag"
-        "train.save_vocab_path=false"
         "train.tensorboard_event_path=$tensorboard_dir"
         "train.test_log_dir=$in_domain_test_log_dir"
         "data.feature_table_key=$feature_table_key"
