@@ -5,6 +5,7 @@ from pathlib import Path
 from shutil import copy2
 from typing import cast
 
+import torch
 from omegaconf import DictConfig, OmegaConf
 
 
@@ -134,7 +135,8 @@ def package_model(
         staged_config_path = temporary_path / "config.yaml"
         staged_vocab_path = temporary_path / "vocab.pkl"
 
-        copy2(checkpoint_path, staged_model_path)
+        inference_checkpoint = extract_inference_checkpoint(checkpoint_path)
+        torch.save(inference_checkpoint, staged_model_path)
         copy2(resolved_vocab_path, staged_vocab_path)
         OmegaConf.save(packaged_config, staged_config_path)
 
@@ -144,6 +146,36 @@ def package_model(
             archive.add(staged_vocab_path, arcname="vocab.pkl")
 
     return output_path
+
+
+def extract_inference_checkpoint(checkpoint_path: Path) -> dict[str, object]:
+    """
+    学習用 checkpoint から、推論に必要な重みだけを取り出す。
+
+    Args:
+        checkpoint_path (Path): 学習済み checkpoint のパス
+
+    Returns:
+        dict[str, object]: `Predictor` が読み込める推論専用 checkpoint
+
+    Raises:
+        KeyError: checkpoint に `state_dict` が含まれていない場合
+    """
+
+    checkpoint = cast(
+        dict[str, object],
+        torch.load(checkpoint_path, map_location="cpu", weights_only=False),
+    )
+
+    if "state_dict" not in checkpoint:
+        raise KeyError(f"Checkpoint does not contain state_dict: {checkpoint_path}")
+
+    # 学習再開に必要な optimizer / scheduler state は配布モデルでは不要である
+    # ここでは `Predictor` が参照する `state_dict` のみを残し、
+    # release asset のサイズを最小限に抑える
+    return {
+        "state_dict": checkpoint["state_dict"],
+    }
 
 
 def entry() -> None:
